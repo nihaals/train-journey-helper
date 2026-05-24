@@ -2,7 +2,6 @@ pub mod types;
 
 use crate::{config::RttConfig, custom_types::TrainService, provider::TrainProvider};
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset};
 
 #[derive(Clone)]
@@ -20,7 +19,6 @@ impl RttClient {
     }
 }
 
-#[async_trait]
 impl TrainProvider for RttClient {
     async fn departures_between(
         &self,
