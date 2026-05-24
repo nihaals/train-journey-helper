@@ -96,10 +96,12 @@ fn station(key: &str) -> Result<String> {
     let value = env::var(key).with_context(|| format!("{key} is required"))?;
     ensure!(value.len() == 3, "{key} must be a 3-letter CRS code");
     ensure!(
-        value.chars().all(|c| c.is_ascii_alphabetic()),
-        "{key} must only contain letters"
+        value
+            .chars()
+            .all(|c| c.is_ascii_alphabetic() && c.is_ascii_uppercase()),
+        "{key} must only contain uppercase letters",
     );
-    Ok(value.to_ascii_uppercase())
+    Ok(value)
 }
 
 fn parse_env<T>(key: &str) -> Result<T>
