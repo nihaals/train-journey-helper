@@ -1,6 +1,7 @@
+use std::{env, net::SocketAddr};
+
 use anyhow::{Context, Result, ensure};
 use chrono::{NaiveTime, Weekday};
-use std::{env, net::SocketAddr};
 
 #[derive(Debug, Clone)]
 pub struct Config {

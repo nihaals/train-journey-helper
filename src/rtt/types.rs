@@ -1,7 +1,8 @@
-use crate::custom_types::{TrainCompany, TrainService};
 use anyhow::{Context, Result, ensure};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
+
+use crate::custom_types::{TrainCompany, TrainService};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

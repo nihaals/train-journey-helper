@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
+use anyhow::{Context, Result, ensure};
+use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, TimeZone, Weekday};
+use tokio::sync::Mutex;
+
 use crate::{
     config::Config, custom_types::JourneyOption, home_assistant::HomeAssistantNotifier,
     provider::TrainProvider,
 };
-use anyhow::{Context, Result, ensure};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, TimeZone, Weekday};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JourneyState {

@@ -1,6 +1,7 @@
-use crate::{config::HomeAssistantConfig, custom_types::JourneyOption};
 use anyhow::{Context, Result};
 use serde::Serialize;
+
+use crate::{config::HomeAssistantConfig, custom_types::JourneyOption};
 
 #[derive(Clone)]
 pub struct HomeAssistantNotifier {

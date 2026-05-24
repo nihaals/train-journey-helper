@@ -1,6 +1,7 @@
-use crate::custom_types::TrainService;
 use anyhow::Result;
 use chrono::{DateTime, FixedOffset};
+
+use crate::custom_types::TrainService;
 
 pub trait TrainProvider: Send + Sync + 'static {
     async fn departures_between(

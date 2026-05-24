@@ -1,8 +1,9 @@
 pub mod types;
 
-use crate::{config::RttConfig, custom_types::TrainService, provider::TrainProvider};
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset};
+
+use crate::{config::RttConfig, custom_types::TrainService, provider::TrainProvider};
 
 #[derive(Clone)]
 pub struct RttClient {

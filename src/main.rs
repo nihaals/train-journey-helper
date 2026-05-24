@@ -5,16 +5,18 @@ mod home_assistant;
 mod provider;
 mod rtt;
 
+use std::sync::Arc;
+
+use anyhow::Result;
+use axum::{Router, extract::State, http::StatusCode, routing::post};
+use tokio::sync::Mutex;
+
 use crate::{
     app::{App, JourneyState},
     config::Config,
     home_assistant::HomeAssistantNotifier,
     rtt::RttClient,
 };
-use anyhow::Result;
-use axum::{Router, extract::State, http::StatusCode, routing::post};
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[tokio::main]
 async fn main() -> Result<()> {
