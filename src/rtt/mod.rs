@@ -1,4 +1,4 @@
-pub mod types;
+mod types;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset};
