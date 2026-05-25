@@ -1,6 +1,6 @@
 use std::{env, net::SocketAddr};
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use chrono::{NaiveTime, Weekday};
 
 #[derive(Debug, Clone)]
@@ -124,6 +124,6 @@ fn parse_weekday(value: &str) -> Result<Weekday> {
         "fri" | "friday" => Ok(Weekday::Fri),
         "sat" | "saturday" => Ok(Weekday::Sat),
         "sun" | "sunday" => Ok(Weekday::Sun),
-        _ => anyhow::bail!("TRAVEL_DAY must be a weekday name"),
+        _ => bail!("TRAVEL_DAY must be a weekday name"),
     }
 }

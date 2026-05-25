@@ -74,6 +74,11 @@ async fn main() -> Result<()> {
 
 type SharedState = State<Arc<Mutex<JourneyState>>>;
 
+async fn set_state(State(state): SharedState, next: JourneyState) -> StatusCode {
+    *state.lock().await = next;
+    StatusCode::NO_CONTENT
+}
+
 async fn set_on_train_home_to_interchange(state: SharedState) -> StatusCode {
     set_state(state, JourneyState::OnTrainHomeToInterchange).await
 }
@@ -104,11 +109,6 @@ async fn set_on_train_interchange_to_home(state: SharedState) -> StatusCode {
 
 async fn set_complete(state: SharedState) -> StatusCode {
     set_state(state, JourneyState::Complete).await
-}
-
-async fn set_state(State(state): SharedState, next: JourneyState) -> StatusCode {
-    *state.lock().await = next;
-    StatusCode::NO_CONTENT
 }
 
 async fn shutdown_signal() {
