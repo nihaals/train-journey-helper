@@ -22,7 +22,6 @@ struct NotifyData<'a> {
     tag: &'a str,
     // TODO: Static
     group: &'a str,
-    sticky: bool,
 }
 
 impl HomeAssistantNotifier {
@@ -94,7 +93,6 @@ impl HomeAssistantNotifier {
                 data: NotifyData {
                     tag,
                     group: "train-journey-helper",
-                    sticky: true,
                 },
             })
             .send()
