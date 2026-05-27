@@ -18,20 +18,26 @@ struct NotifyRequest<'a> {
 
 #[derive(Debug, Serialize)]
 struct NotifyData<'a> {
+    // TODO: Tag should be the same for all notifications related to the same journey/day
     tag: &'a str,
+    // TODO: Static
     group: &'a str,
     sticky: bool,
 }
 
 impl HomeAssistantNotifier {
     pub fn new(config: HomeAssistantConfig) -> Self {
+        // TODO: Take in client, use single client across whole app
         Self {
             http: reqwest::Client::new(),
             config,
         }
     }
 
+    // TODO: Move specific notification functions away from Home Assistant and have Home Assistant just provide send
+    // through a trait
     pub async fn send_status_report(&self, options: &[JourneyOption]) -> Result<()> {
+        // TODO: We should give pairs of 1-2 and 4-5 trips and some indication that return isn't cancelled
         let mut message = String::new();
         for option in options {
             message.push_str(&format_journey(option));
@@ -63,6 +69,7 @@ impl HomeAssistantNotifier {
             .await
     }
 
+    // TODO: Remove
     pub async fn send_healthcheck(&self) -> Result<()> {
         self.send(
             "Train journey helper",
@@ -76,7 +83,7 @@ impl HomeAssistantNotifier {
         let url = format!(
             "{}/api/services/notify/{}",
             self.config.base_url.trim_end_matches('/'),
-            self.config.notify_service
+            self.config.notify_service,
         );
         self.http
             .post(url)

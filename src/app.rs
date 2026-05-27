@@ -44,10 +44,12 @@ impl<P: TrainProvider> App<P> {
     }
 
     pub async fn send_healthcheck(&self) -> Result<()> {
+        // TODO: Replace
         self.notifier.send_healthcheck().await
     }
 
     pub async fn run_scheduler(self: Arc<Self>) -> Result<()> {
+        // TODO: Add span?
         wait_until(self.monitoring_start_time()?).await;
         let options = self.outbound_options().await?;
         self.notifier.send_status_report(&options).await?;

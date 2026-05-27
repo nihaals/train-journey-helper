@@ -20,6 +20,7 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // TODO: Add clap, move to `run` command and add test commands for getting trains and sending notification
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -31,6 +32,10 @@ async fn main() -> Result<()> {
     app.send_healthcheck().await?;
 
     let state = app.state_handle();
+    // TODO: Don't add stations to paths
+    // TODO: Add endpoint for exposing configured stations to help UI label endpoints
+    // TODO: Add span for each request
+    // TODO: Add time as input
     let router = Router::new()
         .route(
             "/update-status/on-train-1-2",
@@ -47,6 +52,7 @@ async fn main() -> Result<()> {
         )
         .route("/update-status/at-5", post(set_at_destination))
         .route(
+            // TODO: Should be more specific, will be when taking in time
             "/update-status/on-train-5-23",
             post(set_on_train_destination_to_interchange),
         )
@@ -58,6 +64,7 @@ async fn main() -> Result<()> {
         .with_state(state);
 
     let scheduler = Arc::clone(&app);
+    // TODO: Use JoinSet
     tokio::spawn(async move {
         if let Err(error) = scheduler.run_scheduler().await {
             tracing::error!(?error, "scheduler failed");

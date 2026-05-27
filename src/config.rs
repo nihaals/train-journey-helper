@@ -25,6 +25,7 @@ pub struct Stations {
 
 #[derive(Debug, Clone)]
 pub struct WalkTimes {
+    // TODO: Use u8
     pub home_to_station_1_minutes: i64,
     pub station_2_to_4_minutes: i64,
     pub station_4_to_3_minutes: i64,
@@ -46,6 +47,7 @@ pub struct RttConfig {
 }
 
 impl Config {
+    // TODO: Move to Pkl
     pub fn from_env() -> Result<Self> {
         let stations = Stations {
             home: station("TRAIN_STATION_1")?,
@@ -117,6 +119,7 @@ where
 
 fn parse_weekday(value: &str) -> Result<Weekday> {
     match value.trim().to_ascii_lowercase().as_str() {
+        // TODO: Be more picky
         "mon" | "monday" => Ok(Weekday::Mon),
         "tue" | "tues" | "tuesday" => Ok(Weekday::Tue),
         "wed" | "wednesday" => Ok(Weekday::Wed),

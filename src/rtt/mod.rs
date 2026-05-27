@@ -27,6 +27,7 @@ impl TrainProvider for RttClient {
         to: &str,
         not_before: DateTime<FixedOffset>,
     ) -> Result<Vec<TrainService>> {
+        // TODO: Check API
         let date = not_before.format("%Y/%m/%d");
         let url = format!(
             "{}/search/{from}/to/{to}/{date}",
