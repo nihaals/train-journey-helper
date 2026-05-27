@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{Router, extract::State, http::StatusCode, routing::post};
+use clap::{CommandFactory, Parser, Subcommand};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -18,9 +19,42 @@ use crate::{
     rtt::RttClient,
 };
 
+#[derive(Parser)]
+#[command(version, author, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Run the main poll loop and HTTP server
+    Run,
+
+    /// Generate shell completions
+    Completions {
+        /// The shell to generate the completions for
+        #[arg(value_enum)]
+        shell: clap_complete_command::Shell,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    // TODO: Add clap, move to `run` command and add test commands for getting trains and sending notification
+    let cli = Cli::parse();
+
+    match cli.command {
+        Commands::Run => run().await?,
+        // TODO: Add test commands for getting trains and sending notification
+        Commands::Completions { shell } => {
+            shell.generate(&mut Cli::command(), &mut std::io::stdout());
+        }
+    }
+
+    Ok(())
+}
+
+async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
