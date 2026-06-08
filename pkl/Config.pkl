@@ -1,0 +1,61 @@
+stations: Stations
+walk: WalkTimes
+destination_arrival_time: Time
+travel_day: Weekday
+listen_addr: SocketAddr
+healthcheck_url: Url?
+home_assistant: HomeAssistantConfig
+rtt: RttConfig
+
+typealias Station = String(matches(Regex(#"[A-Z]{3}"#)))
+class Stations {
+  home: Station
+  line_one_interchange_primary: Station
+  line_one_interchange_return_preferred: Station
+  destination_line_interchange: Station
+  destination: Station
+}
+
+local const function durationToMinutes(value: Duration): Number = value.toUnit("min").value
+local class ConvertDurationMinutes extends ConvertProperty {
+  render = (property: Pair<String, Duration>, _) ->
+    Pair(property.key + "_minutes", durationToMinutes(property.value))
+}
+local const function isPositiveIntMinutes(value: Duration): Boolean =
+  durationToMinutes(value) > 0
+    && durationToMinutes(value).toInt() == durationToMinutes(value)
+typealias Minutes = Duration(isPositiveIntMinutes(this))
+class WalkTimes {
+  @ConvertDurationMinutes {}
+  home_to_station_1: Minutes
+  @ConvertDurationMinutes {}
+  station_2_to_4: Minutes
+  @ConvertDurationMinutes {}
+  station_4_to_3: Minutes
+  @ConvertDurationMinutes {}
+  station_5_to_final_destination: Minutes
+}
+
+typealias Time = String(matches(Regex(#"\d{2}:\d{2}"#)))
+typealias Weekday =
+  "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday"
+typealias SocketAddr = String(matches(Regex(#"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5}"#)))
+typealias Url = String(matches(Regex(#"https?://.+"#)))
+
+class HomeAssistantConfig {
+  base_url: Url
+  token: String
+  notify_service: String(matches(Regex(#"([\da-z][\da-z_]*[\da-z]|[\da-z])"#)))
+}
+
+class RttConfig {
+  base_url: Url
+  username: String
+  password: String
+}
+
+output {
+  renderer = new JsonRenderer {
+    omitNullProperties = false
+  }
+}
