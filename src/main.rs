@@ -5,7 +5,10 @@ mod home_assistant;
 mod provider;
 mod rtt;
 
-use std::sync::Arc;
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Result;
 use axum::{Router, extract::State, http::StatusCode, routing::post};
@@ -28,7 +31,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Run the main poll loop and HTTP server
-    Run,
+    Run {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+    },
 
     /// Generate shell completions
     Completions {
@@ -43,7 +50,7 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Run => run().await?,
+        Commands::Run { config } => run(&config).await?,
         // TODO: Add test commands for getting trains and sending notification
         Commands::Completions { shell } => {
             shell.generate(&mut Cli::command(), &mut std::io::stdout());
@@ -53,12 +60,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run() -> Result<()> {
+async fn run(config_path: &Path) -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    let config = Config::from_env()?;
+    let config = Config::from_json(config_path)?;
     let client = reqwest::Client::new();
     let app = Arc::new(App::<RttClient>::new(config, client));
     app.send_healthcheck().await?;
