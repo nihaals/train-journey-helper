@@ -1,5 +1,8 @@
 use anyhow::{Context, Result, anyhow, ensure};
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
+use jiff::{
+    Timestamp,
+    civil::{Date, Time},
+};
 use serde::Deserialize;
 
 use crate::custom_types::{TrainCompany, TrainService};
@@ -74,7 +77,7 @@ impl TryFrom<Service> for TrainService {
             value.service_uid
         );
 
-        let run_date = NaiveDate::parse_from_str(&value.run_date, "%Y-%m-%d")
+        let run_date = Date::strptime("%Y-%m-%d", &value.run_date)
             .with_context(|| format!("invalid RTT runDate {}", value.run_date))?;
 
         Ok(Self {
@@ -121,13 +124,8 @@ impl TryFrom<Service> for TrainService {
     }
 }
 
-fn parse_datetime(date: NaiveDate, hhmm: &str) -> Result<DateTime<FixedOffset>> {
+fn parse_datetime(date: Date, hhmm: &str) -> Result<Timestamp> {
     ensure!(hhmm.len() == 4, "expected HHMM time, got {hhmm}");
-    let time = NaiveTime::parse_from_str(hhmm, "%H%M")
-        .with_context(|| format!("invalid RTT time {hhmm}"))?;
-    let offset = FixedOffset::east_opt(0).context("UTC offset is invalid")?;
-    NaiveDateTime::new(date, time)
-        .and_local_timezone(offset)
-        .single()
-        .context("could not construct datetime")
+    let time = Time::strptime("%H%M", hhmm).with_context(|| format!("invalid RTT time {hhmm}"))?;
+    Ok(date.to_datetime(time).in_tz("Europe/London")?.timestamp())
 }

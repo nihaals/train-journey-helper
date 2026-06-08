@@ -1,4 +1,5 @@
 use anyhow::Result;
+use jiff::Timestamp;
 
 use crate::{config::Config, custom_types::JourneyOption};
 
@@ -48,7 +49,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         // cancelled
         let mut message = String::new();
         for option in options {
-            message.push_str(&format_journey(option));
+            message.push_str(&format_journey(option)?);
             message.push('\n');
         }
         self.notifier
@@ -60,7 +61,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.notifier
             .send_notification(
                 self.delayed_title,
-                &format!("{}\n{}", self.delayed_prefix, format_journey(best)),
+                &format!("{}\n{}", self.delayed_prefix, format_journey(best)?),
                 self.status_tag,
                 self.group,
             )
@@ -83,7 +84,7 @@ impl<N: Notifier> JourneyNotifier<N> {
     pub async fn send_return_details(&self, options: &[JourneyOption]) -> Result<()> {
         let mut message = String::new();
         for option in options {
-            message.push_str(&format_journey(option));
+            message.push_str(&format_journey(option)?);
             message.push('\n');
         }
         self.notifier
@@ -92,22 +93,23 @@ impl<N: Notifier> JourneyNotifier<N> {
     }
 }
 
-fn format_journey(option: &JourneyOption) -> String {
-    format!(
+fn format_journey(option: &JourneyOption) -> Result<String> {
+    Ok(format!(
         "{} {}→{} {} (arr {}) then {}→{} {} (arr {}) via {}; walk {}m",
-        option
-            .outbound_first_leg
-            .estimated_departure
-            .format("%H:%M"),
+        format_time(option.outbound_first_leg.estimated_departure)?,
         option.outbound_first_leg.from,
         option.outbound_first_leg.to,
         option.outbound_first_leg.company,
-        option.outbound_first_leg.estimated_arrival.format("%H:%M"),
+        format_time(option.outbound_first_leg.estimated_arrival)?,
         option.outbound_second_leg.from,
         option.outbound_second_leg.to,
         option.outbound_second_leg.company,
-        option.outbound_second_leg.estimated_arrival.format("%H:%M"),
+        format_time(option.outbound_second_leg.estimated_arrival)?,
         option.outbound_second_leg.route_destination,
         option.interchange_walk_minutes,
-    )
+    ))
+}
+
+fn format_time(time: Timestamp) -> Result<String> {
+    Ok(time.in_tz("Europe/London")?.strftime("%H:%M").to_string())
 }

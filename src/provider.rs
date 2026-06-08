@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 
 use crate::{config::Config, custom_types::TrainService, station::Station};
 
@@ -10,7 +10,6 @@ pub trait TrainProvider {
         &self,
         from: Station,
         to: Station,
-        // TODO: Use UTC internally, convert to timezone in notifications
-        not_before: DateTime<FixedOffset>,
+        not_before: Timestamp,
     ) -> Result<Vec<TrainService>>;
 }

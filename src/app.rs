@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, TimeZone, Weekday};
+use jiff::{Timestamp, ToSpan, civil::Date};
 use num_traits::ToPrimitive;
 use tokio::sync::Mutex;
 
@@ -101,8 +101,8 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     pub async fn outbound_options(&self) -> Result<Vec<JourneyOption>> {
-        let start =
-            now_fixed()? + Duration::minutes(self.config.walk.home_to_station_1_minutes.into());
+        let start = now_fixed()
+            .checked_add(i64::from(self.config.walk.home_to_station_1_minutes).minutes())?;
         self.options_via(
             self.config.stations.home,
             self.config.stations.line_one_interchange_primary,
@@ -115,7 +115,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     pub async fn return_options(&self) -> Result<Vec<JourneyOption>> {
-        let start = now_fixed()?;
+        let start = now_fixed();
         let mut via_3 = self
             .options_via(
                 self.config.stations.destination,
@@ -142,26 +142,24 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         Ok(via_3)
     }
 
-    fn monitoring_start_time(&self) -> Result<DateTime<FixedOffset>> {
-        let today = Local::now().date_naive();
+    fn monitoring_start_time(&self) -> Result<Timestamp> {
+        let today = Timestamp::now().in_tz("Europe/London")?.date();
         let date = next_weekday(today, self.config.travel_day);
-        let offset = FixedOffset::east_opt(Local::now().offset().local_minus_utc())
-            .context("local offset is invalid")?;
-        let arrival = offset
-            .from_local_datetime(&date.and_time(self.config.destination_arrival_time))
-            .single()
-            .context("could not construct destination arrival datetime")?;
+        let arrival = date
+            .to_datetime(self.config.destination_arrival_time)
+            .in_tz("Europe/London")?
+            .timestamp();
         let rough_journey = self.config.walk.home_to_station_1_minutes
             + self.config.walk.station_2_to_4_minutes
             + self.config.walk.station_5_to_final_destination_minutes
             + 90;
-        Ok(arrival
-            - Duration::minutes(
-                (f64::from(rough_journey) * 1.75)
-                    .round()
-                    .to_i64()
-                    .context("Failed to convert rough journey duration to i64")?,
-            ))
+        Ok(arrival.checked_sub(
+            (f64::from(rough_journey) * 1.75)
+                .round()
+                .to_i64()
+                .context("Failed to convert rough journey duration to i64")?
+                .minutes(),
+        )?)
     }
 
     async fn options_via(
@@ -171,7 +169,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         leg2_from: Station,
         leg2_to: Station,
         walk_minutes: u8,
-        not_before: DateTime<FixedOffset>,
+        not_before: Timestamp,
     ) -> Result<Vec<JourneyOption>> {
         let first_legs = self
             .provider
@@ -179,8 +177,9 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .await?;
         let mut options = Vec::new();
         for first in first_legs.into_iter().take(6) {
-            let second_not_before =
-                first.estimated_arrival + Duration::minutes(walk_minutes.into());
+            let second_not_before = first
+                .estimated_arrival
+                .checked_add(i64::from(walk_minutes).minutes())?;
             let second = self
                 .provider
                 .departures_between(leg2_from, leg2_to, second_not_before)
@@ -200,24 +199,25 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 }
 
-async fn wait_until(when: DateTime<FixedOffset>) {
-    if let Ok(now) = now_fixed()
-        && when > now
-    {
-        let wait = (when - now).to_std().unwrap_or_default();
-        tokio::time::sleep(wait).await;
+async fn wait_until(when: Timestamp) {
+    let now = now_fixed();
+    if when <= now {
+        return;
     }
+
+    // TODO: We can convert from Span to Duration directly but we should rewrite our waiting logic
+    // first
+    let seconds = now.duration_until(when).as_secs().try_into().unwrap();
+    tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
 }
 
-fn now_fixed() -> Result<DateTime<FixedOffset>> {
-    let now = Local::now();
-    let offset = FixedOffset::east_opt(now.offset().local_minus_utc()).context("invalid offset")?;
-    Ok(now.with_timezone(&offset))
+fn now_fixed() -> Timestamp {
+    Timestamp::now()
 }
 
-fn next_weekday(mut date: chrono::NaiveDate, weekday: Weekday) -> chrono::NaiveDate {
+fn next_weekday(mut date: Date, weekday: jiff::civil::Weekday) -> Date {
     while date.weekday() != weekday {
-        date += Duration::days(1);
+        date = date.tomorrow().expect("next day should be in range");
     }
     date
 }

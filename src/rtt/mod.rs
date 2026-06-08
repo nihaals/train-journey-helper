@@ -1,7 +1,7 @@
 mod types;
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 
 use crate::{
     config::{Config, RttConfig},
@@ -28,10 +28,13 @@ impl TrainProvider for RttClient {
         &self,
         from: Station,
         to: Station,
-        not_before: DateTime<FixedOffset>,
+        not_before: Timestamp,
     ) -> Result<Vec<TrainService>> {
         // TODO: Check API
-        let date = not_before.format("%Y/%m/%d");
+        let date = not_before
+            .in_tz("Europe/London")?
+            .strftime("%Y/%m/%d")
+            .to_string();
         let url = format!(
             "{}/search/{from}/to/{to}/{date}",
             self.config.base_url.trim_end_matches('/')

@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset};
+use jiff::Timestamp;
 
 use crate::station::Station;
 
@@ -6,21 +6,25 @@ use crate::station::Station;
 pub struct TrainService {
     pub from: Station,
     pub to: Station,
-    pub planned_departure: DateTime<FixedOffset>,
-    pub estimated_departure: DateTime<FixedOffset>,
-    pub planned_arrival: DateTime<FixedOffset>,
-    pub estimated_arrival: DateTime<FixedOffset>,
+    pub planned_departure: Timestamp,
+    pub estimated_departure: Timestamp,
+    pub planned_arrival: Timestamp,
+    pub estimated_arrival: Timestamp,
     pub company: TrainCompany,
     pub route_destination: String,
 }
 
 impl TrainService {
     pub fn departure_delay_minutes(&self) -> i64 {
-        (self.estimated_departure - self.planned_departure).num_minutes()
+        self.planned_departure
+            .duration_until(self.estimated_departure)
+            .as_mins()
     }
 
     pub fn arrival_delay_minutes(&self) -> i64 {
-        (self.estimated_arrival - self.planned_arrival).num_minutes()
+        self.planned_arrival
+            .duration_until(self.estimated_arrival)
+            .as_mins()
     }
 }
 
@@ -67,7 +71,7 @@ pub struct JourneyOption {
 }
 
 impl JourneyOption {
-    pub fn arrives_at_destination(&self) -> DateTime<FixedOffset> {
+    pub fn arrives_at_destination(&self) -> Timestamp {
         self.outbound_second_leg.estimated_arrival
     }
 
