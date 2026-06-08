@@ -3,7 +3,7 @@ use chrono::{DateTime, FixedOffset};
 
 use crate::{config::Config, custom_types::TrainService};
 
-pub trait TrainProvider: Send + Sync + 'static {
+pub trait TrainProvider {
     fn new(config: &Config, client: reqwest::Client) -> Self;
 
     async fn departures_between(
