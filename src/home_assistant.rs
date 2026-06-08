@@ -12,7 +12,7 @@ pub struct HomeAssistantNotifier {
 #[derive(Debug, Serialize)]
 struct NotifyRequest<'a> {
     title: &'a str,
-    message: String,
+    message: &'a str,
     data: NotifyData<'a>,
 }
 
@@ -42,7 +42,7 @@ impl HomeAssistantNotifier {
             message.push_str(&format_journey(option));
             message.push('\n');
         }
-        self.send("Train options", "train-journey-status", message)
+        self.send("Train options", "train-journey-status", &message)
             .await
     }
 
@@ -50,7 +50,7 @@ impl HomeAssistantNotifier {
         self.send(
             "Train delayed",
             "train-journey-status",
-            format!(
+            &format!(
                 "A train is delayed. Best current option:\n{}",
                 format_journey(best)
             ),
@@ -64,11 +64,11 @@ impl HomeAssistantNotifier {
             message.push_str(&format_journey(option));
             message.push('\n');
         }
-        self.send("Return train options", "train-journey-return", message)
+        self.send("Return train options", "train-journey-return", &message)
             .await
     }
 
-    async fn send(&self, title: &'static str, tag: &'static str, message: String) -> Result<()> {
+    async fn send(&self, title: &'static str, tag: &'static str, message: &str) -> Result<()> {
         let url = format!(
             "{}/api/services/notify/{}",
             self.config.base_url.trim_end_matches('/'),
