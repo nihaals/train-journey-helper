@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, anyhow, ensure};
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::Deserialize;
 
@@ -78,8 +78,13 @@ impl TryFrom<Service> for TrainService {
             .with_context(|| format!("invalid RTT runDate {}", value.run_date))?;
 
         Ok(Self {
-            from: value.location_detail.crs,
-            to: to.crs,
+            from: value.location_detail.crs.parse().map_err(|error| {
+                anyhow!("invalid origin CRS {}: {error}", value.location_detail.crs)
+            })?,
+            to: to
+                .crs
+                .parse()
+                .map_err(|error| anyhow!("invalid destination CRS {}: {error}", to.crs))?,
             planned_departure: parse_datetime(
                 run_date,
                 value

@@ -4,6 +4,7 @@ mod custom_types;
 mod home_assistant;
 mod provider;
 mod rtt;
+mod station;
 
 use std::{
     path::{Path, PathBuf},

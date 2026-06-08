@@ -1,9 +1,11 @@
 use chrono::{DateTime, FixedOffset};
 
+use crate::station::Station;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrainService {
-    pub from: String,
-    pub to: String,
+    pub from: Station,
+    pub to: Station,
     pub planned_departure: DateTime<FixedOffset>,
     pub estimated_departure: DateTime<FixedOffset>,
     pub planned_arrival: DateTime<FixedOffset>,

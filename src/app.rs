@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::Config, custom_types::JourneyOption, home_assistant::HomeAssistantNotifier,
-    provider::TrainProvider,
+    provider::TrainProvider, station::Station,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,10 +97,10 @@ impl<P: TrainProvider> App<P> {
         let start =
             now_fixed()? + Duration::minutes(self.config.walk.home_to_station_1_minutes.max(0));
         self.options_via(
-            &self.config.stations.home,
-            &self.config.stations.line_one_interchange_primary,
-            &self.config.stations.destination_line_interchange,
-            &self.config.stations.destination,
+            self.config.stations.home,
+            self.config.stations.line_one_interchange_primary,
+            self.config.stations.destination_line_interchange,
+            self.config.stations.destination,
             self.config.walk.station_2_to_4_minutes,
             start,
         )
@@ -111,20 +111,20 @@ impl<P: TrainProvider> App<P> {
         let start = now_fixed()?;
         let mut via_3 = self
             .options_via(
-                &self.config.stations.destination,
-                &self.config.stations.destination_line_interchange,
-                &self.config.stations.line_one_interchange_return_preferred,
-                &self.config.stations.home,
+                self.config.stations.destination,
+                self.config.stations.destination_line_interchange,
+                self.config.stations.line_one_interchange_return_preferred,
+                self.config.stations.home,
                 self.config.walk.station_4_to_3_minutes,
                 start,
             )
             .await?;
         let mut via_2 = self
             .options_via(
-                &self.config.stations.destination,
-                &self.config.stations.destination_line_interchange,
-                &self.config.stations.line_one_interchange_primary,
-                &self.config.stations.home,
+                self.config.stations.destination,
+                self.config.stations.destination_line_interchange,
+                self.config.stations.line_one_interchange_primary,
+                self.config.stations.home,
                 self.config.walk.station_2_to_4_minutes,
                 start,
             )
@@ -153,10 +153,10 @@ impl<P: TrainProvider> App<P> {
 
     async fn options_via(
         &self,
-        leg1_from: &str,
-        leg1_to: &str,
-        leg2_from: &str,
-        leg2_to: &str,
+        leg1_from: Station,
+        leg1_to: Station,
+        leg2_from: Station,
+        leg2_to: Station,
         walk_minutes: i64,
         not_before: DateTime<FixedOffset>,
     ) -> Result<Vec<JourneyOption>> {

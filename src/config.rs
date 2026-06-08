@@ -3,11 +3,11 @@ use std::{fs, net::SocketAddr, path::Path};
 use anyhow::{Context, Result};
 use chrono::{NaiveTime, Weekday};
 use serde::Deserialize;
-use validator::{Validate, ValidationError};
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+use crate::station::Station;
+
+#[derive(Debug, Clone, Deserialize)]
 pub struct Config {
-    #[validate(nested)]
     pub stations: Stations,
     pub walk: WalkTimes,
     pub destination_arrival_time: NaiveTime,
@@ -18,18 +18,13 @@ pub struct Config {
     pub rtt: RttConfig,
 }
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Stations {
-    #[validate(custom(function = "validate_station"))]
-    pub home: String,
-    #[validate(custom(function = "validate_station"))]
-    pub line_one_interchange_primary: String,
-    #[validate(custom(function = "validate_station"))]
-    pub line_one_interchange_return_preferred: String,
-    #[validate(custom(function = "validate_station"))]
-    pub destination_line_interchange: String,
-    #[validate(custom(function = "validate_station"))]
-    pub destination: String,
+    pub home: Station,
+    pub line_one_interchange_primary: Station,
+    pub line_one_interchange_return_preferred: Station,
+    pub destination_line_interchange: Station,
+    pub destination: Station,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -55,25 +50,12 @@ pub struct RttConfig {
     pub password: String,
 }
 
-fn validate_station(value: &str) -> std::result::Result<(), ValidationError> {
-    if value.len() == 3
-        && value
-            .chars()
-            .all(|c| c.is_ascii_alphabetic() && c.is_ascii_uppercase())
-    {
-        Ok(())
-    } else {
-        Err(ValidationError::new("station"))
-    }
-}
-
 impl Config {
     pub fn from_json(path: &Path) -> Result<Self> {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config from {}", path.display()))?;
         let config: Self = serde_json::from_str(&contents)
             .with_context(|| format!("Failed to parse JSON config from {}", path.display()))?;
-        config.validate().context("Invalid config")?;
         Ok(config)
     }
 }

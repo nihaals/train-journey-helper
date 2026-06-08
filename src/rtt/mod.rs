@@ -7,6 +7,7 @@ use crate::{
     config::{Config, RttConfig},
     custom_types::TrainService,
     provider::TrainProvider,
+    station::Station,
 };
 
 #[derive(Clone)]
@@ -25,8 +26,8 @@ impl TrainProvider for RttClient {
 
     async fn departures_between(
         &self,
-        from: &str,
-        to: &str,
+        from: Station,
+        to: Station,
         not_before: DateTime<FixedOffset>,
     ) -> Result<Vec<TrainService>> {
         // TODO: Check API
