@@ -188,11 +188,11 @@ impl<P: TrainProvider> App<P> {
 }
 
 async fn wait_until(when: DateTime<FixedOffset>) {
-    if let Ok(now) = now_fixed() {
-        if when > now {
-            let wait = (when - now).to_std().unwrap_or_default();
-            tokio::time::sleep(wait).await;
-        }
+    if let Ok(now) = now_fixed()
+        && when > now
+    {
+        let wait = (when - now).to_std().unwrap_or_default();
+        tokio::time::sleep(wait).await;
     }
 }
 
