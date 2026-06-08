@@ -10,6 +10,7 @@ pub struct Config {
     pub destination_arrival_time: NaiveTime,
     pub travel_day: Weekday,
     pub listen_addr: SocketAddr,
+    pub healthcheck_url: Option<String>,
     pub home_assistant: HomeAssistantConfig,
     pub rtt: RttConfig,
 }
@@ -76,6 +77,7 @@ impl Config {
                 .unwrap_or_else(|_| "0.0.0.0:3000".to_string())
                 .parse()
                 .context("LISTEN_ADDR must be host:port")?,
+            healthcheck_url: env::var("HEALTHCHECK_URL").ok(),
             home_assistant: HomeAssistantConfig {
                 base_url: env::var("HOME_ASSISTANT_BASE_URL")
                     .context("HOME_ASSISTANT_BASE_URL is required")?,

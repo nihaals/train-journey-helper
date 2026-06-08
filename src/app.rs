@@ -43,9 +43,18 @@ impl<P: TrainProvider> App<P> {
         Arc::clone(&self.state)
     }
 
+    /// Sends request to healthcheck URL if configured
     pub async fn send_healthcheck(&self) -> Result<()> {
-        // TODO: Replace
-        self.notifier.send_healthcheck().await
+        if let Some(url) = &self.config.healthcheck_url {
+            // TODO: Share client
+            let client = reqwest::Client::new();
+            client
+                .get(url)
+                .send()
+                .await
+                .context("Failed to send healthcheck")?;
+        }
+        Ok(())
     }
 
     pub async fn run_scheduler(self: Arc<Self>) -> Result<()> {

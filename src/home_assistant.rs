@@ -69,16 +69,6 @@ impl HomeAssistantNotifier {
             .await
     }
 
-    // TODO: Remove
-    pub async fn send_healthcheck(&self) -> Result<()> {
-        self.send(
-            "Train journey helper",
-            "train-journey-healthcheck",
-            "Service is running".to_string(),
-        )
-        .await
-    }
-
     async fn send(&self, title: &'static str, tag: &'static str, message: String) -> Result<()> {
         let url = format!(
             "{}/api/services/notify/{}",
