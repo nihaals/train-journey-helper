@@ -6,6 +6,7 @@ mod notifier;
 mod provider;
 mod rtt;
 mod station;
+mod timezone;
 
 use std::{
     path::{Path, PathBuf},
@@ -58,6 +59,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    timezone::init()?;
 
     match cli.command {
         Commands::Run { config } => run(&config).await?,

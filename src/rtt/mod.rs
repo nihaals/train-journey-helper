@@ -8,6 +8,7 @@ use crate::{
     custom_types::TrainService,
     provider::TrainProvider,
     station::Station,
+    timezone::TimestampExt,
 };
 
 #[derive(Clone)]
@@ -32,7 +33,7 @@ impl TrainProvider for RttClient {
     ) -> Result<Vec<TrainService>> {
         // TODO: Check API
         let date = not_before
-            .in_tz("Europe/London")?
+            .to_london_zoned()
             .strftime("%Y/%m/%d")
             .to_string();
         let url = format!(

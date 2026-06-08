@@ -1,7 +1,7 @@
 use anyhow::Result;
 use jiff::Timestamp;
 
-use crate::{config::Config, custom_types::JourneyOption};
+use crate::{config::Config, custom_types::JourneyOption, timezone::TimestampExt};
 
 pub trait Notifier {
     fn new(config: &Config, client: reqwest::Client) -> Self;
@@ -111,5 +111,5 @@ fn format_journey(option: &JourneyOption) -> Result<String> {
 }
 
 fn format_time(time: Timestamp) -> Result<String> {
-    Ok(time.in_tz("Europe/London")?.strftime("%H:%M").to_string())
+    Ok(time.to_london_zoned().strftime("%H:%M").to_string())
 }

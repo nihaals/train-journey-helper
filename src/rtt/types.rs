@@ -5,7 +5,10 @@ use jiff::{
 };
 use serde::Deserialize;
 
-use crate::custom_types::{TrainCompany, TrainService};
+use crate::{
+    custom_types::{TrainCompany, TrainService},
+    timezone::DateTimeExt,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,5 +130,5 @@ impl TryFrom<Service> for TrainService {
 fn parse_datetime(date: Date, hhmm: &str) -> Result<Timestamp> {
     ensure!(hhmm.len() == 4, "expected HHMM time, got {hhmm}");
     let time = Time::strptime("%H%M", hhmm).with_context(|| format!("invalid RTT time {hhmm}"))?;
-    Ok(date.to_datetime(time).in_tz("Europe/London")?.timestamp())
+    Ok(date.to_datetime(time).to_london_zoned()?.timestamp())
 }

@@ -11,6 +11,7 @@ use crate::{
     notifier::{JourneyNotifier, Notifier},
     provider::TrainProvider,
     station::Station,
+    timezone::{DateTimeExt, TimestampExt},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,11 +144,11 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     fn monitoring_start_time(&self) -> Result<Timestamp> {
-        let today = Timestamp::now().in_tz("Europe/London")?.date();
+        let today = Timestamp::now().to_london_zoned().date();
         let date = next_weekday(today, self.config.travel_day);
         let arrival = date
             .to_datetime(self.config.destination_arrival_time)
-            .in_tz("Europe/London")?
+            .to_london_zoned()?
             .timestamp();
         let rough_journey = self.config.walk.home_to_station_1_minutes
             + self.config.walk.station_2_to_4_minutes
