@@ -3,7 +3,11 @@ mod types;
 use anyhow::{Context, Result};
 use chrono::{DateTime, FixedOffset};
 
-use crate::{config::RttConfig, custom_types::TrainService, provider::TrainProvider};
+use crate::{
+    config::{Config, RttConfig},
+    custom_types::TrainService,
+    provider::TrainProvider,
+};
 
 #[derive(Clone)]
 pub struct RttClient {
@@ -11,16 +15,14 @@ pub struct RttClient {
     config: RttConfig,
 }
 
-impl RttClient {
-    pub fn new(config: RttConfig) -> Self {
+impl TrainProvider for RttClient {
+    fn new(config: &Config, client: reqwest::Client) -> Self {
         Self {
-            http: reqwest::Client::new(),
-            config,
+            http: client,
+            config: config.rtt.clone(),
         }
     }
-}
 
-impl TrainProvider for RttClient {
     async fn departures_between(
         &self,
         from: &str,

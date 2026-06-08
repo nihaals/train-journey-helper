@@ -25,10 +25,9 @@ struct NotifyData<'a> {
 }
 
 impl HomeAssistantNotifier {
-    pub fn new(config: HomeAssistantConfig) -> Self {
-        // TODO: Take in client, use single client across whole app
+    pub fn new(config: HomeAssistantConfig, client: reqwest::Client) -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: client,
             config,
         }
     }

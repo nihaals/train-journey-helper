@@ -15,7 +15,6 @@ use tokio::sync::Mutex;
 use crate::{
     app::{App, JourneyState},
     config::Config,
-    home_assistant::HomeAssistantNotifier,
     rtt::RttClient,
 };
 
@@ -60,9 +59,8 @@ async fn run() -> Result<()> {
         .init();
 
     let config = Config::from_env()?;
-    let provider = RttClient::new(config.rtt.clone());
-    let notifier = HomeAssistantNotifier::new(config.home_assistant.clone());
-    let app = Arc::new(App::new(config, provider, notifier));
+    let client = reqwest::Client::new();
+    let app = Arc::new(App::<RttClient>::new(config, client));
     app.send_healthcheck().await?;
 
     let state = app.state_handle();

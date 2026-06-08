@@ -24,17 +24,19 @@ pub enum JourneyState {
 
 pub struct App<P> {
     pub config: Config,
+    http: reqwest::Client,
     provider: P,
     notifier: HomeAssistantNotifier,
     state: Arc<Mutex<JourneyState>>,
 }
 
 impl<P: TrainProvider> App<P> {
-    pub fn new(config: Config, provider: P, notifier: HomeAssistantNotifier) -> Self {
+    pub fn new(config: Config, client: reqwest::Client) -> Self {
         Self {
+            provider: P::new(&config, client.clone()),
+            notifier: HomeAssistantNotifier::new(config.home_assistant.clone(), client.clone()),
+            http: client,
             config,
-            provider,
-            notifier,
             state: Arc::new(Mutex::new(JourneyState::Waiting)),
         }
     }
@@ -46,9 +48,7 @@ impl<P: TrainProvider> App<P> {
     /// Sends request to healthcheck URL if configured
     pub async fn send_healthcheck(&self) -> Result<()> {
         if let Some(url) = &self.config.healthcheck_url {
-            // TODO: Share client
-            let client = reqwest::Client::new();
-            client
+            self.http
                 .get(url)
                 .send()
                 .await
