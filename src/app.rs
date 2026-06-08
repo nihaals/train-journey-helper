@@ -5,8 +5,11 @@ use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, TimeZone, Weekday
 use tokio::sync::Mutex;
 
 use crate::{
-    config::Config, custom_types::JourneyOption, home_assistant::HomeAssistantNotifier,
-    provider::TrainProvider, station::Station,
+    config::Config,
+    custom_types::JourneyOption,
+    notifier::{JourneyNotifier, Notifier},
+    provider::TrainProvider,
+    station::Station,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,19 +25,19 @@ pub enum JourneyState {
     SkippedDay,
 }
 
-pub struct App<P> {
+pub struct App<P, N> {
     pub config: Config,
     http: reqwest::Client,
     provider: P,
-    notifier: HomeAssistantNotifier,
+    notifier: JourneyNotifier<N>,
     state: Arc<Mutex<JourneyState>>,
 }
 
-impl<P: TrainProvider> App<P> {
+impl<P: TrainProvider, N: Notifier> App<P, N> {
     pub fn new(config: Config, client: reqwest::Client) -> Self {
         Self {
             provider: P::new(&config, client.clone()),
-            notifier: HomeAssistantNotifier::new(config.home_assistant.clone(), client.clone()),
+            notifier: JourneyNotifier::new(N::new(&config, client.clone())),
             http: client,
             config,
             state: Arc::new(Mutex::new(JourneyState::Waiting)),
@@ -67,7 +70,10 @@ impl<P: TrainProvider> App<P> {
         loop {
             interval.tick().await;
             match *self.state.lock().await {
-                JourneyState::SkippedDay | JourneyState::Complete => break,
+                JourneyState::SkippedDay | JourneyState::Complete => {
+                    self.notifier.clear_notifications().await?;
+                    break;
+                }
                 JourneyState::SkippedUntilDestination | JourneyState::AtDestination => {
                     let options = self.return_options().await?;
                     self.notifier.send_return_details(&options).await?;
