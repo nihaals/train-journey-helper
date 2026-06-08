@@ -1727,6 +1727,7 @@ dependencies = [
  "chrono",
  "clap",
  "clap_complete_command",
+ "num-traits",
  "reqwest",
  "serde",
  "serde_json",

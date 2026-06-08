@@ -63,7 +63,7 @@ impl std::fmt::Display for TrainCompany {
 pub struct JourneyOption {
     pub outbound_first_leg: TrainService,
     pub outbound_second_leg: TrainService,
-    pub interchange_walk_minutes: i64,
+    pub interchange_walk_minutes: u8,
 }
 
 impl JourneyOption {

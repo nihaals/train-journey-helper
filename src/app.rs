@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Duration, FixedOffset, Local, TimeZone, Weekday};
+use num_traits::ToPrimitive;
 use tokio::sync::Mutex;
 
 use crate::{
@@ -101,7 +102,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
 
     pub async fn outbound_options(&self) -> Result<Vec<JourneyOption>> {
         let start =
-            now_fixed()? + Duration::minutes(self.config.walk.home_to_station_1_minutes.max(0));
+            now_fixed()? + Duration::minutes(self.config.walk.home_to_station_1_minutes.into());
         self.options_via(
             self.config.stations.home,
             self.config.stations.line_one_interchange_primary,
@@ -154,7 +155,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             + self.config.walk.station_2_to_4_minutes
             + self.config.walk.station_5_to_final_destination_minutes
             + 90;
-        Ok(arrival - Duration::minutes((rough_journey as f64 * 1.75).round() as i64))
+        Ok(arrival
+            - Duration::minutes(
+                (f64::from(rough_journey) * 1.75)
+                    .round()
+                    .to_i64()
+                    .context("Failed to convert rough journey duration to i64")?,
+            ))
     }
 
     async fn options_via(
@@ -163,17 +170,17 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         leg1_to: Station,
         leg2_from: Station,
         leg2_to: Station,
-        walk_minutes: i64,
+        walk_minutes: u8,
         not_before: DateTime<FixedOffset>,
     ) -> Result<Vec<JourneyOption>> {
-        ensure!(walk_minutes >= 0, "walk time must not be negative");
         let first_legs = self
             .provider
             .departures_between(leg1_from, leg1_to, not_before)
             .await?;
         let mut options = Vec::new();
         for first in first_legs.into_iter().take(6) {
-            let second_not_before = first.estimated_arrival + Duration::minutes(walk_minutes);
+            let second_not_before =
+                first.estimated_arrival + Duration::minutes(walk_minutes.into());
             let second = self
                 .provider
                 .departures_between(leg2_from, leg2_to, second_not_before)

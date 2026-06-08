@@ -29,11 +29,10 @@ pub struct Stations {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalkTimes {
-    // TODO: Use u8
-    pub home_to_station_1_minutes: i64,
-    pub station_2_to_4_minutes: i64,
-    pub station_4_to_3_minutes: i64,
-    pub station_5_to_final_destination_minutes: i64,
+    pub home_to_station_1_minutes: u8,
+    pub station_2_to_4_minutes: u8,
+    pub station_4_to_3_minutes: u8,
+    pub station_5_to_final_destination_minutes: u8,
 }
 
 #[derive(Debug, Clone, Deserialize)]
