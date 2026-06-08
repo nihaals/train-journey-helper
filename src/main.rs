@@ -40,6 +40,13 @@ enum Commands {
         config: PathBuf,
     },
 
+    /// Parse and print the config file
+    Config {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+    },
+
     /// Generate shell completions
     Completions {
         /// The shell to generate the completions for
@@ -54,6 +61,10 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { config } => run(&config).await?,
+        Commands::Config { config } => {
+            let config = Config::from_json(&config)?;
+            println!("{:#?}", config);
+        }
         // TODO: Add test commands for getting trains and sending notification
         Commands::Completions { shell } => {
             shell.generate(&mut Cli::command(), &mut std::io::stdout());
