@@ -33,10 +33,11 @@ impl HomeAssistantNotifier {
         }
     }
 
-    // TODO: Move specific notification functions away from Home Assistant and have Home Assistant just provide send
-    // through a trait
+    // TODO: Move specific notification functions away from Home Assistant and have Home Assistant
+    // just provide send through a trait
     pub async fn send_status_report(&self, options: &[JourneyOption]) -> Result<()> {
-        // TODO: We should give pairs of 1-2 and 4-5 trips and some indication that return isn't cancelled
+        // TODO: We should give pairs of 1-2 and 4-5 trips and some indication that return isn't
+        // cancelled
         let mut message = String::new();
         for option in options {
             message.push_str(&format_journey(option));
