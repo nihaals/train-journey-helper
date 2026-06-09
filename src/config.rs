@@ -54,6 +54,7 @@ pub struct WalkTimes {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct HomeAssistantConfig {
+    /// Base API url for Home Assistant, e.g. `https://example.com/api/`
     pub base_url: String,
     pub token: String,
     pub notify_service: String,

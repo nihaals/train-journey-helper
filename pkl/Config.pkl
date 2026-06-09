@@ -43,8 +43,8 @@ typealias SocketAddr = String(matches(Regex(#"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}
 typealias Url = String(matches(Regex(#"https?://.+"#)))
 
 class HomeAssistantConfig {
-  base_url: Url
-  token: String
+  base_url: Url(endsWith("/api/"))
+  token: String(matches(Regex(#"[\da-zA-Z-_]+\.[\da-zA-Z-_]+\.[\da-zA-Z-_]+"#)))
   notify_service: String(matches(Regex(#"([\da-z][\da-z_]*[\da-z]|[\da-z])"#)))
 }
 

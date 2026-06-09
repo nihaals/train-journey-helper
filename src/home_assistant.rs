@@ -24,15 +24,14 @@ struct NotifyData<'a> {
     // TODO: Tag should be the same for all notifications related to the same journey/day
     tag: &'a str,
     // TODO: Static
-    group: &'a str,
+    group: Option<&'a str>,
 }
 
 impl HomeAssistantNotifier {
     async fn send(&self, request: &NotifyRequest<'_>) -> Result<()> {
         let url = format!(
-            "{}/api/services/notify/{}",
-            self.config.base_url.trim_end_matches('/'),
-            self.config.notify_service,
+            "{}services/notify/{}",
+            self.config.base_url, self.config.notify_service,
         );
         self.http
             .post(url)
@@ -40,9 +39,9 @@ impl HomeAssistantNotifier {
             .json(request)
             .send()
             .await
-            .context("sending Home Assistant notification")?
+            .context("Failed to send Home Assistant notification")?
             .error_for_status()
-            .context("Home Assistant returned an error status")?;
+            .context("Failed to trigger Home Assistant notification")?;
         Ok(())
     }
 }
@@ -65,7 +64,10 @@ impl Notifier for HomeAssistantNotifier {
         self.send(&NotifyRequest {
             title,
             message,
-            data: NotifyData { tag, group },
+            data: NotifyData {
+                tag,
+                group: Some(group),
+            },
         })
         .await
     }
@@ -74,11 +76,9 @@ impl Notifier for HomeAssistantNotifier {
         self.send(&NotifyRequest {
             title: "",
             message: "clear_notification",
-            data: NotifyData {
-                tag,
-                group: "train-journey-helper",
-            },
+            data: NotifyData { tag, group: None },
         })
         .await
+        .context("Failed to clear Home Assistant notification")
     }
 }

@@ -22,6 +22,7 @@ use crate::{
     app::{App, JourneyState},
     config::Config,
     home_assistant::HomeAssistantNotifier,
+    notifier::Notifier,
     rtt::RttClient,
 };
 
@@ -41,6 +42,12 @@ enum Commands {
         config: PathBuf,
     },
 
+    /// Test remote APIs
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+
     /// Parse and print the config file
     Config {
         /// Path to the JSON configuration file
@@ -56,6 +63,39 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Send notification
+    Notify {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+
+        #[arg(short, long, default_value = "title")]
+        title: String,
+
+        #[arg(short, long, default_value = "message")]
+        message: String,
+
+        #[arg(short = 'T', long, default_value = "test-tag")]
+        tag: String,
+
+        #[arg(short, long, default_value = "test-group")]
+        group: String,
+    },
+
+    /// Clear notification
+    ClearNotification {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+
+        #[arg(short = 'T', long, default_value = "test-tag")]
+        tag: String,
+    },
+    // TODO: Add command for getting trains
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -63,11 +103,32 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Run { config } => run(&config).await?,
+        Commands::Debug { command } => match command {
+            DebugCommands::Notify {
+                config,
+                title,
+                message,
+                tag,
+                group,
+            } => {
+                let config = Config::from_json(&config)?;
+                let client = reqwest::Client::new();
+                let notifier = HomeAssistantNotifier::new(&config, client);
+                notifier
+                    .send_notification(&title, &message, &tag, &group)
+                    .await?;
+            }
+            DebugCommands::ClearNotification { config, tag } => {
+                let config = Config::from_json(&config)?;
+                let client = reqwest::Client::new();
+                let notifier = HomeAssistantNotifier::new(&config, client);
+                notifier.clear_notification(&tag).await?;
+            }
+        },
         Commands::Config { config } => {
             let config = Config::from_json(&config)?;
             println!("{:#?}", config);
         }
-        // TODO: Add test commands for getting trains and sending notification
         Commands::Completions { shell } => {
             shell.generate(&mut Cli::command(), &mut std::io::stdout());
         }
