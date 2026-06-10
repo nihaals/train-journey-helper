@@ -10,6 +10,11 @@ use crate::{
     timezone::DateTimeExt,
 };
 
+#[derive(Deserialize)]
+pub struct GetAccessTokenResponse {
+    pub token: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResponse {

@@ -62,9 +62,7 @@ pub struct HomeAssistantConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RttConfig {
-    pub base_url: String,
-    pub username: String,
-    pub password: String,
+    pub token: String,
 }
 
 impl Config {
@@ -111,9 +109,7 @@ mod tests {
                 "notify_service": "notify.mobile_app"
               },
               "rtt": {
-                "base_url": "https://example.com/rtt",
-                "username": "user",
-                "password": "pass"
+                "token": "token"
               }
             }
             "#,

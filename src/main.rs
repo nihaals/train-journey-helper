@@ -13,9 +13,10 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{Router, extract::State, http::StatusCode, routing::post};
 use clap::{CommandFactory, Parser, Subcommand};
+use jiff::{Timestamp, civil::DateTime};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -23,7 +24,10 @@ use crate::{
     config::Config,
     home_assistant::HomeAssistantNotifier,
     notifier::Notifier,
+    provider::TrainProvider,
     rtt::RttClient,
+    station::Station,
+    timezone::DateTimeExt,
 };
 
 #[derive(Parser)]
@@ -93,7 +97,20 @@ enum DebugCommands {
         #[arg(short = 'T', long, default_value = "test-tag")]
         tag: String,
     },
-    // TODO: Add command for getting trains
+
+    /// Get train journeys
+    GetTrains {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+
+        from: Station,
+        to: Station,
+
+        /// Earliest departure time to consider, defaults to now
+        #[arg(short = 't', long)]
+        not_before: Option<DateTime>,
+    },
 }
 
 #[tokio::main]
@@ -124,6 +141,26 @@ async fn main() -> Result<()> {
                 let notifier = HomeAssistantNotifier::new(&config, client);
                 notifier.clear_notification(&tag).await?;
             }
+            DebugCommands::GetTrains {
+                config,
+                from,
+                to,
+                not_before,
+            } => {
+                let config = Config::from_json(&config)?;
+                let client = reqwest::Client::new();
+                let provider = RttClient::new(&config, client);
+                let not_before = if let Some(not_before) = not_before {
+                    not_before.to_london_zoned()?.timestamp()
+                } else {
+                    Timestamp::now()
+                };
+                let trains = provider
+                    .departures_between(from, to, not_before)
+                    .await
+                    .context("Failed to get trains")?;
+                println!("{:#?}", trains);
+            }
         },
         Commands::Config { config } => {
             let config = Config::from_json(&config)?;
@@ -152,6 +189,7 @@ async fn run(config_path: &Path) -> Result<()> {
     // TODO: Add endpoint for exposing configured stations to help UI label endpoints
     // TODO: Add span for each request
     // TODO: Add time as input
+    // TODO: Add endpoint to send notification now
     let router = Router::new()
         .route(
             "/update-status/on-train-1-2",
