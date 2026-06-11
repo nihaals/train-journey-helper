@@ -104,6 +104,10 @@ enum DebugCommands {
         #[arg(short, long, default_value = "config.json")]
         config: PathBuf,
 
+        /// Proxy to use (disables certificate verification), e.g. `http://localhost:8080`
+        #[arg(long)]
+        proxy: Option<String>,
+
         from: Station,
         to: Station,
 
@@ -143,12 +147,20 @@ async fn main() -> Result<()> {
             }
             DebugCommands::GetTrains {
                 config,
+                proxy,
                 from,
                 to,
                 not_before,
             } => {
                 let config = Config::from_json(&config)?;
-                let client = reqwest::Client::new();
+                let client = if let Some(proxy) = proxy {
+                    reqwest::Client::builder()
+                        .proxy(reqwest::Proxy::all(proxy)?)
+                        .danger_accept_invalid_certs(true)
+                        .build()?
+                } else {
+                    reqwest::Client::new()
+                };
                 let provider = RttClient::new(&config, client);
                 let not_before = if let Some(not_before) = not_before {
                     not_before.to_london_zoned()?.timestamp()
