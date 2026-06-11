@@ -3,20 +3,13 @@ use jiff::Timestamp;
 use crate::station::Station;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Platform {
-    Actual(String),
-    Planned(String),
-    Unknown,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrainServiceStation {
     pub station: Station,
     pub scheduled_arrival: Timestamp,
     pub estimated_arrival: Timestamp,
     pub scheduled_departure: Timestamp,
     pub estimated_departure: Timestamp,
-    pub platform: Platform,
+    pub platform: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

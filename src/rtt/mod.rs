@@ -1,18 +1,15 @@
 mod api_types;
 
-use std::str::FromStr;
-
 use anyhow::{Context, Result, ensure};
-use jiff::{Span, Timestamp, civil::DateTime};
+use jiff::{Span, Timestamp};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::{
     config::{Config, RttConfig},
-    custom_types::{Platform, TrainService, TrainServiceStation},
+    custom_types::{TrainService, TrainServiceStation},
     provider::TrainProvider,
     station::Station,
-    timezone::DateTimeExt,
 };
 
 fn base64_decode_url_safe_no_pad(input: &str) -> Result<Vec<u8>, base64::DecodeError> {
@@ -158,22 +155,20 @@ fn service_station(
                 .actual
                 .as_ref()
                 .filter(|actual| !actual.is_empty())
-                .map(|actual| Platform::Actual(actual.clone()))
                 .or_else(|| {
                     platform
-                        .planned
+                        .forecast
                         .as_ref()
                         .filter(|planned| !planned.is_empty())
                         .or_else(|| {
                             platform
-                                .forecast
+                                .planned
                                 .as_ref()
                                 .filter(|forecast| !forecast.is_empty())
                         })
-                        .map(|planned| Platform::Planned(planned.clone()))
                 })
         })
-        .unwrap_or(Platform::Unknown);
+        .cloned();
 
     Ok(TrainServiceStation {
         station,
@@ -204,11 +199,8 @@ fn train_service_from_rtt(
         .destination
         .first()
         .context("RTT service did not include destination")?;
-    let number_of_carriages = service
-        .locations
-        .iter()
-        .find_map(|location| location.location_metadata.number_of_vehicles)
-        .unwrap_or_default();
+    // TODO: Make sure they're all the same
+    let number_of_carriages = service.locations[0].location_metadata.number_of_vehicles;
 
     Ok(TrainService {
         from: from_station,
@@ -264,22 +256,13 @@ impl TrainProvider for RttClient {
                 "RTT service mode type is not TRAIN"
             );
 
-            // TODO: Is this safe?
-            let Some(departure_data) = service.temporal_data.departure.as_ref() else {
-                continue;
-            };
+            let departure_data = service.temporal_data.departure;
             let Some(departure) = departure_data
                 .realtime_forecast
-                .as_ref()
-                .or(departure_data.schedule_advertised.as_ref())
+                .or(departure_data.schedule_advertised)
             else {
                 continue;
             };
-            // TODO: Be part of API types
-            let departure = DateTime::from_str(departure)
-                .with_context(|| format!("Failed to parse RTT departure time {departure}"))?
-                .to_london_zoned()?
-                .timestamp();
             if departure < not_before {
                 continue;
             }

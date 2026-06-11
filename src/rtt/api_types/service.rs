@@ -1,26 +1,6 @@
-use std::str::FromStr;
+use serde::Deserialize;
 
-use serde::{Deserialize, Deserializer};
-
-use crate::timezone::DateTimeExt;
-
-fn deserialize_optional_timestamp<'de, D>(
-    deserializer: D,
-) -> Result<Option<jiff::Timestamp>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Option::<String>::deserialize(deserializer)?;
-    value
-        .map(|value| {
-            jiff::civil::DateTime::from_str(&value)
-                .map_err(serde::de::Error::custom)?
-                .to_london_zoned()
-                .map_err(serde::de::Error::custom)
-                .map(|zoned| zoned.timestamp())
-        })
-        .transpose()
-}
+use crate::rtt::api_types::deserializers::deserialize_optional_timestamp;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +34,7 @@ pub struct TemporalData {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndividualTemporalData {
+    // TODO: Some might not be optional
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub schedule_advertised: Option<jiff::Timestamp>,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
@@ -68,8 +49,7 @@ pub struct IndividualTemporalData {
 #[serde(rename_all = "camelCase")]
 pub struct LocationMetadata {
     pub platform: Option<Platform>,
-    // TODO: Is this actually optional?
-    pub number_of_vehicles: Option<u8>,
+    pub number_of_vehicles: u8,
 }
 
 #[derive(Deserialize)]
@@ -83,7 +63,6 @@ pub struct Platform {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Location {
-    #[serde(default)]
     pub description: String,
     #[serde(default)]
     pub short_codes: Vec<String>,

@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::rtt::api_types::deserializers::deserialize_optional_timestamp;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Root {
@@ -16,15 +18,16 @@ pub struct Service {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceTemporalData {
-    // TODO: Is it actually optional?
-    pub departure: Option<TemporalData>,
+    pub departure: TemporalData,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TemporalData {
-    pub schedule_advertised: Option<String>,
-    pub realtime_forecast: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub schedule_advertised: Option<jiff::Timestamp>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub realtime_forecast: Option<jiff::Timestamp>,
 }
 
 #[derive(Deserialize)]
