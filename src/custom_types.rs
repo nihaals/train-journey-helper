@@ -3,63 +3,45 @@ use jiff::Timestamp;
 use crate::station::Station;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrainService {
-    pub from: Station,
-    pub to: Station,
-    pub planned_departure: Timestamp,
-    pub estimated_departure: Timestamp,
-    pub planned_arrival: Timestamp,
+pub enum Platform {
+    Actual(String),
+    Planned(String),
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainServiceStation {
+    pub station: Station,
+    pub scheduled_arrival: Timestamp,
     pub estimated_arrival: Timestamp,
-    pub company: TrainCompany,
+    pub scheduled_departure: Timestamp,
+    pub estimated_departure: Timestamp,
+    pub platform: Platform,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainService {
+    pub from: TrainServiceStation,
+    pub to: TrainServiceStation,
+    pub company: String,
+    /// The full station name.
     pub route_destination: String,
+    pub number_of_carriages: u8,
 }
 
 impl TrainService {
     pub fn departure_delay_minutes(&self) -> i64 {
-        self.planned_departure
-            .duration_until(self.estimated_departure)
+        self.from
+            .scheduled_departure
+            .duration_until(self.from.estimated_departure)
             .as_mins()
     }
 
     pub fn arrival_delay_minutes(&self) -> i64 {
-        self.planned_arrival
-            .duration_until(self.estimated_arrival)
+        self.to
+            .scheduled_arrival
+            .duration_until(self.to.estimated_arrival)
             .as_mins()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TrainCompany {
-    ChilternRailways,
-    CrossCountry,
-    LondonNorthwesternRailway,
-    WestMidlandsRailway,
-    Other(String),
-}
-
-impl From<&str> for TrainCompany {
-    fn from(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "chiltern railways" | "chiltern" => Self::ChilternRailways,
-            "crosscountry" | "cross country" => Self::CrossCountry,
-            "london northwestern railway" | "london northwestern" => {
-                Self::LondonNorthwesternRailway
-            }
-            "west midlands railway" => Self::WestMidlandsRailway,
-            other => Self::Other(other.to_string()),
-        }
-    }
-}
-
-impl std::fmt::Display for TrainCompany {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ChilternRailways => write!(f, "Chiltern Railways"),
-            Self::CrossCountry => write!(f, "CrossCountry"),
-            Self::LondonNorthwesternRailway => write!(f, "London Northwestern Railway"),
-            Self::WestMidlandsRailway => write!(f, "West Midlands Railway"),
-            Self::Other(value) => write!(f, "{value}"),
-        }
     }
 }
 
@@ -72,7 +54,7 @@ pub struct JourneyOption {
 
 impl JourneyOption {
     pub fn arrives_at_destination(&self) -> Timestamp {
-        self.outbound_second_leg.estimated_arrival
+        self.outbound_second_leg.to.estimated_arrival
     }
 
     pub fn is_delayed(&self) -> bool {

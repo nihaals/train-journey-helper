@@ -96,15 +96,15 @@ impl<N: Notifier> JourneyNotifier<N> {
 fn format_journey(option: &JourneyOption) -> Result<String> {
     Ok(format!(
         "{} {}→{} {} (arr {}) then {}→{} {} (arr {}) via {}; walk {}m",
-        format_time(option.outbound_first_leg.estimated_departure)?,
-        option.outbound_first_leg.from,
-        option.outbound_first_leg.to,
+        format_time(option.outbound_first_leg.from.estimated_departure)?,
+        option.outbound_first_leg.from.station,
+        option.outbound_first_leg.to.station,
         option.outbound_first_leg.company,
-        format_time(option.outbound_first_leg.estimated_arrival)?,
-        option.outbound_second_leg.from,
-        option.outbound_second_leg.to,
+        format_time(option.outbound_first_leg.to.estimated_arrival)?,
+        option.outbound_second_leg.from.station,
+        option.outbound_second_leg.to.station,
         option.outbound_second_leg.company,
-        format_time(option.outbound_second_leg.estimated_arrival)?,
+        format_time(option.outbound_second_leg.to.estimated_arrival)?,
         option.outbound_second_leg.route_destination,
         option.interchange_walk_minutes,
     ))

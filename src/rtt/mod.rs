@@ -1,15 +1,18 @@
-mod types;
+mod api_types;
+
+use std::str::FromStr;
 
 use anyhow::{Context, Result, ensure};
-use jiff::{Span, Timestamp};
+use jiff::{Span, Timestamp, civil::DateTime};
 use serde::Deserialize;
 use tokio::sync::Mutex;
 
 use crate::{
     config::{Config, RttConfig},
-    custom_types::TrainService,
+    custom_types::{Platform, TrainService, TrainServiceStation},
     provider::TrainProvider,
     station::Station,
+    timezone::DateTimeExt,
 };
 
 fn base64_decode_url_safe_no_pad(input: &str) -> Result<Vec<u8>, base64::DecodeError> {
@@ -54,7 +57,7 @@ pub struct RttClient {
 
 impl RttClient {
     async fn get_access_token(&self) -> Result<String> {
-        let response: types::GetAccessTokenResponse = self
+        let response: api_types::get_access_token::Root = self
             .http
             .get("https://data.rtt.io/api/get_access_token")
             .bearer_auth(&self.config.token)
@@ -80,6 +83,140 @@ impl RttClient {
             }
         }
     }
+
+    async fn service(
+        &self,
+        access_token: &str,
+        unique_identity: &str,
+    ) -> Result<api_types::service::Root> {
+        let unique_identity = unique_identity
+            .strip_prefix("gb-nr:")
+            .unwrap_or(unique_identity);
+        self.http
+            .get("https://data.rtt.io/gb-nr/service")
+            .bearer_auth(access_token)
+            .query(&[("uniqueIdentity", unique_identity)])
+            .send()
+            .await
+            .context("Failed to send RTT service request")?
+            .error_for_status()
+            .context("Failed to get RTT service data")?
+            .json()
+            .await
+            .context("Failed to deserialize RTT service response")
+    }
+}
+
+fn best_time(data: &api_types::service::IndividualTemporalData) -> Option<Timestamp> {
+    data.realtime_actual
+        // TODO: Is forecast better than estimate?
+        .or(data.realtime_forecast)
+        .or(data.realtime_estimate)
+        .or(data.schedule_advertised)
+}
+
+// TODO: Why do we need a function for this
+fn advertised_time(data: &api_types::service::IndividualTemporalData) -> Option<Timestamp> {
+    data.schedule_advertised
+}
+
+fn service_station(
+    service: &api_types::service::Service,
+    station: Station,
+) -> Result<TrainServiceStation> {
+    let location = service
+        .locations
+        .iter()
+        .find(|location| {
+            location
+                .location
+                .short_codes
+                .iter()
+                .any(|code| code == station.as_str())
+        })
+        .with_context(|| format!("RTT service did not include stop {station}"))?;
+
+    let arrival = location
+        .temporal_data
+        .arrival
+        .as_ref()
+        .or(location.temporal_data.departure.as_ref())
+        .with_context(|| format!("RTT service stop {station} did not include arrival/departure"))?;
+    let departure = location
+        .temporal_data
+        .departure
+        .as_ref()
+        .or(location.temporal_data.arrival.as_ref())
+        .with_context(|| format!("RTT service stop {station} did not include departure/arrival"))?;
+
+    let platform = location
+        .location_metadata
+        .platform
+        .as_ref()
+        .and_then(|platform| {
+            platform
+                .actual
+                .as_ref()
+                .filter(|actual| !actual.is_empty())
+                .map(|actual| Platform::Actual(actual.clone()))
+                .or_else(|| {
+                    platform
+                        .planned
+                        .as_ref()
+                        .filter(|planned| !planned.is_empty())
+                        .or_else(|| {
+                            platform
+                                .forecast
+                                .as_ref()
+                                .filter(|forecast| !forecast.is_empty())
+                        })
+                        .map(|planned| Platform::Planned(planned.clone()))
+                })
+        })
+        .unwrap_or(Platform::Unknown);
+
+    Ok(TrainServiceStation {
+        station,
+        scheduled_arrival: advertised_time(arrival).with_context(|| {
+            format!("RTT service stop {station} did not include scheduled arrival")
+        })?,
+        estimated_arrival: best_time(arrival).with_context(|| {
+            format!("RTT service stop {station} did not include estimated arrival")
+        })?,
+        scheduled_departure: advertised_time(departure).with_context(|| {
+            format!("RTT service stop {station} did not include scheduled departure")
+        })?,
+        estimated_departure: best_time(departure).with_context(|| {
+            format!("RTT service stop {station} did not include estimated departure")
+        })?,
+        platform,
+    })
+}
+
+fn train_service_from_rtt(
+    service: api_types::service::Service,
+    from: Station,
+    to: Station,
+) -> Result<TrainService> {
+    let from_station = service_station(&service, from)?;
+    let to_station = service_station(&service, to)?;
+    let destination = service
+        .destination
+        .first()
+        .context("RTT service did not include destination")?;
+    let number_of_carriages = service
+        .locations
+        .iter()
+        .find_map(|location| location.location_metadata.number_of_vehicles)
+        .unwrap_or_default();
+
+    Ok(TrainService {
+        from: from_station,
+        to: to_station,
+        company: service.schedule_metadata.operator.name.clone(),
+        route_destination: destination.location.description.clone(),
+        number_of_carriages,
+    })
 }
 
 impl TrainProvider for RttClient {
@@ -98,10 +235,10 @@ impl TrainProvider for RttClient {
         not_before: Timestamp,
     ) -> Result<Vec<TrainService>> {
         let access_token = self.access_token().await?;
-        let response: types::SearchResponse = self
+        let response: api_types::location::Root = self
             .http
             .get("https://data.rtt.io/gb-nr/location")
-            .bearer_auth(access_token)
+            .bearer_auth(&access_token)
             .query(&[
                 ("code", from.as_str()),
                 ("filterTo", to.as_str()),
@@ -116,15 +253,44 @@ impl TrainProvider for RttClient {
             .await
             .context("Failed to deserialize RTT response")?;
 
-        response
-            .services
-            .into_iter()
-            .map(TrainService::try_from)
-            .filter(|service| {
-                service
-                    .as_ref()
-                    .map_or(true, |service| service.estimated_departure >= not_before)
-            })
-            .collect()
+        let mut trains = Vec::new();
+        for service in response.services {
+            ensure!(
+                service.schedule_metadata.in_passenger_service,
+                "RTT service is not in passenger service"
+            );
+            ensure!(
+                service.schedule_metadata.mode_type == "TRAIN",
+                "RTT service mode type is not TRAIN"
+            );
+
+            // TODO: Is this safe?
+            let Some(departure_data) = service.temporal_data.departure.as_ref() else {
+                continue;
+            };
+            let Some(departure) = departure_data
+                .realtime_forecast
+                .as_ref()
+                .or(departure_data.schedule_advertised.as_ref())
+            else {
+                continue;
+            };
+            // TODO: Be part of API types
+            let departure = DateTime::from_str(departure)
+                .with_context(|| format!("Failed to parse RTT departure time {departure}"))?
+                .to_london_zoned()?
+                .timestamp();
+            if departure < not_before {
+                continue;
+            }
+
+            // TODO: Concurrency
+            let service = self
+                .service(&access_token, &service.schedule_metadata.unique_identity)
+                .await?;
+            trains.push(train_service_from_rtt(service.service, from, to)?);
+        }
+
+        Ok(trains)
     }
 }

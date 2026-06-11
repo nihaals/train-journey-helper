@@ -179,6 +179,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         let mut options = Vec::new();
         for first in first_legs.into_iter().take(6) {
             let second_not_before = first
+                .to
                 .estimated_arrival
                 .checked_add(i64::from(walk_minutes).minutes())?;
             let second = self
