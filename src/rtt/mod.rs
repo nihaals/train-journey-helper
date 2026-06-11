@@ -199,8 +199,14 @@ fn train_service_from_rtt(
         .destination
         .first()
         .context("RTT service did not include destination")?;
-    // TODO: Make sure they're all the same
+    // `service_station()` has already ensured `locations` is not empty
     let number_of_carriages = service.locations[0].location_metadata.number_of_vehicles;
+    ensure!(
+        service.locations.iter().all(|location| {
+            location.location_metadata.number_of_vehicles == number_of_carriages
+        }),
+        "RTT service had inconsistent number of carriages across locations",
+    );
 
     Ok(TrainService {
         from: from_station,
