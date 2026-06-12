@@ -106,9 +106,7 @@ impl RttClient {
 
 fn best_time(data: &api_types::service::IndividualTemporalData) -> Option<Timestamp> {
     data.realtime_actual
-        // TODO: Is forecast better than estimate?
         .or(data.realtime_forecast)
-        .or(data.realtime_estimate)
         .or(data.schedule_advertised)
 }
 
