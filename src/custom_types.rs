@@ -19,7 +19,7 @@ pub struct TrainService {
     pub company: String,
     /// The full station name.
     pub route_destination: String,
-    pub number_of_carriages: u8,
+    pub lowest_number_of_carriages: u8,
 }
 
 impl TrainService {

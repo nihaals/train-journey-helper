@@ -115,21 +115,40 @@ fn advertised_time(data: &api_types::service::IndividualTemporalData) -> Option<
     data.schedule_advertised
 }
 
+fn location_matches_station(
+    location: &api_types::service::ServiceLocation,
+    station: Station,
+) -> bool {
+    location
+        .location
+        .short_codes
+        .iter()
+        .any(|code| code == station.as_str())
+}
+
+fn service_location_index(
+    service: &api_types::service::Service,
+    station: Station,
+) -> Result<usize> {
+    service
+        .locations
+        .iter()
+        .position(|location| location_matches_station(location, station))
+        .with_context(|| format!("RTT service did not include stop {station}"))
+}
+
+fn service_location(
+    service: &api_types::service::Service,
+    station: Station,
+) -> Result<&api_types::service::ServiceLocation> {
+    Ok(&service.locations[service_location_index(service, station)?])
+}
+
 fn service_station(
     service: &api_types::service::Service,
     station: Station,
 ) -> Result<TrainServiceStation> {
-    let location = service
-        .locations
-        .iter()
-        .find(|location| {
-            location
-                .location
-                .short_codes
-                .iter()
-                .any(|code| code == station.as_str())
-        })
-        .with_context(|| format!("RTT service did not include stop {station}"))?;
+    let location = service_location(service, station)?;
 
     let arrival = location
         .temporal_data
@@ -186,6 +205,26 @@ fn service_station(
     })
 }
 
+fn number_of_carriages_for_journey(
+    service: &api_types::service::Service,
+    from: Station,
+    to: Station,
+) -> Result<u8> {
+    let from_index = service_location_index(service, from)?;
+    let to_index = service_location_index(service, to)?;
+
+    ensure!(
+        from_index < to_index,
+        "RTT service stop {from} was not before stop {to}",
+    );
+
+    service.locations[from_index..to_index]
+        .iter()
+        .map(|location| location.location_metadata.number_of_vehicles)
+        .min()
+        .context("RTT service did not include any locations between journey stops")
+}
+
 fn train_service_from_rtt(
     service: api_types::service::Service,
     from: Station,
@@ -197,21 +236,14 @@ fn train_service_from_rtt(
         .destination
         .first()
         .context("RTT service did not include destination")?;
-    // `service_station()` has already ensured `locations` is not empty
-    let number_of_carriages = service.locations[0].location_metadata.number_of_vehicles;
-    ensure!(
-        service.locations.iter().all(|location| {
-            location.location_metadata.number_of_vehicles == number_of_carriages
-        }),
-        "RTT service had inconsistent number of carriages across locations",
-    );
+    let lowest_number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
 
     Ok(TrainService {
         from: from_station,
         to: to_station,
         company: service.schedule_metadata.operator.name.clone(),
         route_destination: destination.location.description.clone(),
-        number_of_carriages,
+        lowest_number_of_carriages,
     })
 }
 
@@ -279,5 +311,77 @@ impl TrainProvider for RttClient {
         }
 
         Ok(trains)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    fn station(code: &str) -> Station {
+        Station::from_str(code).unwrap()
+    }
+
+    fn service_location(code: &str, number_of_vehicles: u8) -> api_types::service::ServiceLocation {
+        api_types::service::ServiceLocation {
+            temporal_data: api_types::service::TemporalData {
+                arrival: None,
+                departure: None,
+            },
+            location_metadata: api_types::service::LocationMetadata {
+                platform: None,
+                number_of_vehicles,
+            },
+            location: api_types::service::Location {
+                description: code.to_owned(),
+                short_codes: vec![code.to_owned()],
+            },
+        }
+    }
+
+    fn service_with_carriages(stops: &[(&str, u8)]) -> api_types::service::Service {
+        api_types::service::Service {
+            schedule_metadata: api_types::service::ScheduleMetadata {
+                operator: api_types::service::Operator {
+                    name: "Operator".to_owned(),
+                },
+            },
+            locations: stops
+                .iter()
+                .map(|(code, number_of_vehicles)| service_location(code, *number_of_vehicles))
+                .collect(),
+            destination: vec![api_types::service::Destination {
+                location: api_types::service::Location {
+                    description: "Destination".to_owned(),
+                    short_codes: vec!["DST".to_owned()],
+                },
+            }],
+        }
+    }
+
+    #[test]
+    fn number_of_carriages_uses_minimum_from_from_until_before_to() {
+        let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 12), ("DDD", 2)]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
+        assert_eq!(carriages, 4);
+    }
+
+    #[test]
+    fn number_of_carriages_includes_drop_at_from() {
+        let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 8)]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("BBB"), station("CCC")).unwrap();
+        assert_eq!(carriages, 4);
+    }
+
+    #[test]
+    fn number_of_carriages_excludes_drop_at_to() {
+        let service = service_with_carriages(&[("AAA", 8), ("BBB", 8), ("CCC", 4)]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("AAA"), station("CCC")).unwrap();
+        assert_eq!(carriages, 8);
     }
 }
