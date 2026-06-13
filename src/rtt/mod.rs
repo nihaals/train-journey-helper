@@ -299,6 +299,10 @@ impl TrainProvider for RttClient {
 
         let mut trains = Vec::new();
         for service in response.services {
+            if service.schedule_metadata.mode_type == "BUS" {
+                continue;
+            }
+
             ensure!(
                 service.schedule_metadata.in_passenger_service,
                 "RTT service is not in passenger service"
