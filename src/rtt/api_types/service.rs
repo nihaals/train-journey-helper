@@ -34,7 +34,7 @@ pub struct TemporalData {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndividualTemporalData {
-    // TODO: Test cancelled trains
+    pub is_cancelled: bool,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub schedule_advertised: Option<jiff::Timestamp>,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]

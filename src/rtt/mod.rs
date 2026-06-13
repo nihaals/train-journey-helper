@@ -1,6 +1,6 @@
 mod api_types;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use jiff::{Span, Timestamp};
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -144,11 +144,31 @@ fn service_location(
     Ok(&service.locations[service_location_index(service, station)?])
 }
 
+fn service_location_is_cancelled(location: &api_types::service::ServiceLocation) -> Result<bool> {
+    match (
+        location.temporal_data.arrival.as_ref(),
+        location.temporal_data.departure.as_ref(),
+    ) {
+        (Some(arrival), Some(departure)) => {
+            ensure!(
+                arrival.is_cancelled == departure.is_cancelled,
+                "RTT service stop has inconsistent arrival/departure cancellation status",
+            );
+            Ok(arrival.is_cancelled)
+        }
+        (Some(data), None) | (None, Some(data)) => Ok(data.is_cancelled),
+        (None, None) => bail!("RTT service stop did not include arrival/departure data"),
+    }
+}
+
 fn service_station(
     service: &api_types::service::Service,
     station: Station,
-) -> Result<TrainServiceStation> {
+) -> Result<Option<TrainServiceStation>> {
     let location = service_location(service, station)?;
+    if service_location_is_cancelled(location)? {
+        return Ok(None);
+    }
 
     let arrival = location
         .temporal_data
@@ -187,7 +207,7 @@ fn service_station(
         })
         .cloned();
 
-    Ok(TrainServiceStation {
+    Ok(Some(TrainServiceStation {
         station,
         scheduled_arrival: advertised_time(arrival).with_context(|| {
             format!("RTT service stop {station} did not include scheduled arrival")
@@ -202,7 +222,7 @@ fn service_station(
             format!("RTT service stop {station} did not include estimated departure")
         })?,
         platform,
-    })
+    }))
 }
 
 fn number_of_carriages_for_journey(
@@ -218,10 +238,17 @@ fn number_of_carriages_for_journey(
         "RTT service stop {from} was not before stop {to}",
     );
 
-    let locations = &service.locations[from_index..to_index];
+    let locations = service.locations[from_index..to_index]
+        .iter()
+        .filter_map(|location| match service_location_is_cancelled(location) {
+            Ok(false) => Some(Ok(location)),
+            Ok(true) => None,
+            Err(error) => Some(Err(error)),
+        })
+        .collect::<Result<Vec<_>>>()?;
     let at_from = locations
         .first()
-        .unwrap()
+        .expect("from should not be cancelled")
         .location_metadata
         .number_of_vehicles;
 
@@ -245,22 +272,26 @@ fn train_service_from_rtt(
     service: api_types::service::Service,
     from: Station,
     to: Station,
-) -> Result<TrainService> {
-    let from_station = service_station(&service, from)?;
-    let to_station = service_station(&service, to)?;
+) -> Result<Option<TrainService>> {
+    let Some(from_station) = service_station(&service, from)? else {
+        return Ok(None);
+    };
+    let Some(to_station) = service_station(&service, to)? else {
+        return Ok(None);
+    };
     let destination = service
         .destination
         .first()
         .context("RTT service did not include destination")?;
     let number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
 
-    Ok(TrainService {
+    Ok(Some(TrainService {
         from: from_station,
         to: to_station,
         company: service.schedule_metadata.operator.name.clone(),
         route_destination: destination.location.description.clone(),
         number_of_carriages,
-    })
+    }))
 }
 
 impl TrainProvider for RttClient {
@@ -327,7 +358,9 @@ impl TrainProvider for RttClient {
             let service = self
                 .service(&access_token, &service.schedule_metadata.unique_identity)
                 .await?;
-            trains.push(train_service_from_rtt(service.service, from, to)?);
+            if let Some(service) = train_service_from_rtt(service.service, from, to)? {
+                trains.push(service);
+            }
         }
 
         Ok(trains)
@@ -344,11 +377,24 @@ mod tests {
         Station::from_str(code).unwrap()
     }
 
-    fn service_location(code: &str, number_of_vehicles: u8) -> api_types::service::ServiceLocation {
+    fn temporal_data(is_cancelled: bool) -> api_types::service::IndividualTemporalData {
+        api_types::service::IndividualTemporalData {
+            is_cancelled,
+            schedule_advertised: Some(Timestamp::from_second(0).unwrap()),
+            realtime_forecast: None,
+            realtime_actual: None,
+        }
+    }
+
+    fn service_location(
+        code: &str,
+        number_of_vehicles: u8,
+        is_cancelled: bool,
+    ) -> api_types::service::ServiceLocation {
         api_types::service::ServiceLocation {
             temporal_data: api_types::service::TemporalData {
-                arrival: None,
-                departure: None,
+                arrival: Some(temporal_data(is_cancelled)),
+                departure: Some(temporal_data(is_cancelled)),
             },
             location_metadata: api_types::service::LocationMetadata {
                 platform: None,
@@ -361,17 +407,16 @@ mod tests {
         }
     }
 
-    fn service_with_carriages(stops: &[(&str, u8)]) -> api_types::service::Service {
+    fn service_with_locations(
+        locations: Vec<api_types::service::ServiceLocation>,
+    ) -> api_types::service::Service {
         api_types::service::Service {
             schedule_metadata: api_types::service::ScheduleMetadata {
                 operator: api_types::service::Operator {
                     name: "Operator".to_owned(),
                 },
             },
-            locations: stops
-                .iter()
-                .map(|(code, number_of_vehicles)| service_location(code, *number_of_vehicles))
-                .collect(),
+            locations,
             destination: vec![api_types::service::Destination {
                 location: api_types::service::Location {
                     description: "Destination".to_owned(),
@@ -379,6 +424,17 @@ mod tests {
                 },
             }],
         }
+    }
+
+    fn service_with_carriages(stops: &[(&str, u8)]) -> api_types::service::Service {
+        service_with_locations(
+            stops
+                .iter()
+                .map(|(code, number_of_vehicles)| {
+                    service_location(code, *number_of_vehicles, false)
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -409,5 +465,55 @@ mod tests {
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("CCC")).unwrap();
         assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
+    }
+
+    #[test]
+    fn number_of_carriages_ignores_cancelled_intermediate_stops() {
+        let service = service_with_locations(vec![
+            service_location("AAA", 8, false),
+            service_location("BBB", 4, true),
+            service_location("CCC", 8, false),
+            service_location("DDD", 8, false),
+        ]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
+        assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
+    }
+
+    #[test]
+    fn train_service_does_not_exist_when_from_is_cancelled() {
+        let service = service_with_locations(vec![
+            service_location("AAA", 8, true),
+            service_location("BBB", 8, false),
+        ]);
+        let service = train_service_from_rtt(service, station("AAA"), station("BBB")).unwrap();
+        assert!(service.is_none());
+    }
+
+    #[test]
+    fn train_service_does_not_exist_when_to_is_cancelled() {
+        let service = service_with_locations(vec![
+            service_location("AAA", 8, false),
+            service_location("BBB", 8, true),
+        ]);
+        let service = train_service_from_rtt(service, station("AAA"), station("BBB")).unwrap();
+        assert!(service.is_none());
+    }
+
+    #[test]
+    fn cancellation_status_must_match_between_arrival_and_departure() {
+        let mut location = service_location("AAA", 8, false);
+        location
+            .temporal_data
+            .arrival
+            .as_mut()
+            .unwrap()
+            .is_cancelled = true;
+        let error = service_location_is_cancelled(&location).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("inconsistent arrival/departure cancellation status")
+        );
     }
 }
