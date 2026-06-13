@@ -13,13 +13,19 @@ pub struct TrainServiceStation {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NumberOfCarriages {
+    SameThroughout(u8),
+    Varies { minimum: u8, at_from: u8 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrainService {
     pub from: TrainServiceStation,
     pub to: TrainServiceStation,
     pub company: String,
     /// The full station name.
     pub route_destination: String,
-    pub lowest_number_of_carriages: u8,
+    pub number_of_carriages: NumberOfCarriages,
 }
 
 impl TrainService {

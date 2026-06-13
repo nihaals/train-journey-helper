@@ -7,7 +7,7 @@ use tokio::sync::Mutex;
 
 use crate::{
     config::{Config, RttConfig},
-    custom_types::{TrainService, TrainServiceStation},
+    custom_types::{NumberOfCarriages, TrainService, TrainServiceStation},
     provider::TrainProvider,
     station::Station,
 };
@@ -209,7 +209,7 @@ fn number_of_carriages_for_journey(
     service: &api_types::service::Service,
     from: Station,
     to: Station,
-) -> Result<u8> {
+) -> Result<NumberOfCarriages> {
     let from_index = service_location_index(service, from)?;
     let to_index = service_location_index(service, to)?;
 
@@ -218,11 +218,27 @@ fn number_of_carriages_for_journey(
         "RTT service stop {from} was not before stop {to}",
     );
 
-    service.locations[from_index..to_index]
+    let locations = &service.locations[from_index..to_index];
+    let at_from = locations
+        .first()
+        .unwrap()
+        .location_metadata
+        .number_of_vehicles;
+
+    if locations
+        .iter()
+        .all(|location| location.location_metadata.number_of_vehicles == at_from)
+    {
+        return Ok(NumberOfCarriages::SameThroughout(at_from));
+    }
+
+    let minimum = locations
         .iter()
         .map(|location| location.location_metadata.number_of_vehicles)
         .min()
-        .context("RTT service did not include any locations between journey stops")
+        .context("RTT service did not include any locations between journey stops")?;
+
+    Ok(NumberOfCarriages::Varies { minimum, at_from })
 }
 
 fn train_service_from_rtt(
@@ -236,14 +252,14 @@ fn train_service_from_rtt(
         .destination
         .first()
         .context("RTT service did not include destination")?;
-    let lowest_number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
+    let number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
 
     Ok(TrainService {
         from: from_station,
         to: to_station,
         company: service.schedule_metadata.operator.name.clone(),
         route_destination: destination.location.description.clone(),
-        lowest_number_of_carriages,
+        number_of_carriages,
     })
 }
 
@@ -366,7 +382,13 @@ mod tests {
         let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 12), ("DDD", 2)]);
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
-        assert_eq!(carriages, 4);
+        assert_eq!(
+            carriages,
+            NumberOfCarriages::Varies {
+                minimum: 4,
+                at_from: 8
+            }
+        );
     }
 
     #[test]
@@ -374,7 +396,7 @@ mod tests {
         let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 8)]);
         let carriages =
             number_of_carriages_for_journey(&service, station("BBB"), station("CCC")).unwrap();
-        assert_eq!(carriages, 4);
+        assert_eq!(carriages, NumberOfCarriages::SameThroughout(4));
     }
 
     #[test]
@@ -382,6 +404,6 @@ mod tests {
         let service = service_with_carriages(&[("AAA", 8), ("BBB", 8), ("CCC", 4)]);
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("CCC")).unwrap();
-        assert_eq!(carriages, 8);
+        assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
     }
 }
