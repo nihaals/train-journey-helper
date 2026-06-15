@@ -1,20 +1,13 @@
 stations: Stations
 walk: WalkTimes
 destination_arrival_time: Time
+@ConvertDurationMinutes {}
+destination_stay_estimate: Minutes
 travel_day: Weekday
 listen_addr: SocketAddr
 healthcheck_url: Url?
 home_assistant: HomeAssistantConfig
 rtt: RttConfig
-
-typealias Station = String(matches(Regex(#"[A-Z]{3}"#)))
-class Stations {
-  home: Station
-  line_one_interchange_primary: Station
-  line_one_interchange_return_preferred: Station
-  destination_line_interchange: Station
-  destination: Station
-}
 
 local const function durationToMinutes(value: Duration): Number = value.toUnit("min").value
 local class ConvertDurationMinutes extends ConvertProperty {
@@ -25,6 +18,16 @@ local const function isPositiveIntMinutes(value: Duration): Boolean =
   durationToMinutes(value) > 0
     && durationToMinutes(value).toInt() == durationToMinutes(value)
 typealias Minutes = Duration(isPositiveIntMinutes(this))
+
+typealias Station = String(matches(Regex(#"[A-Z]{3}"#)))
+class Stations {
+  home: Station
+  line_one_interchange_primary: Station
+  line_one_interchange_return_preferred: Station
+  destination_line_interchange: Station
+  destination: Station
+}
+
 class WalkTimes {
   @ConvertDurationMinutes {}
   home_to_station_1: Minutes

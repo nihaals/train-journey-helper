@@ -12,4 +12,11 @@ pub trait TrainProvider {
         to: Station,
         not_before: Timestamp,
     ) -> Result<Vec<TrainService>>;
+
+    async fn get_service(
+        &self,
+        service_id: &str,
+        from: Station,
+        to: Station,
+    ) -> Result<TrainService>;
 }

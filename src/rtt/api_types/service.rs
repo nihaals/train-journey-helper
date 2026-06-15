@@ -75,6 +75,7 @@ pub struct Destination {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleMetadata {
+    pub unique_identity: String,
     pub operator: Operator,
 }
 

@@ -3,7 +3,7 @@ use std::{
     str::FromStr,
 };
 
-use serde::{Deserialize, Deserializer, de::Error};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Station([u8; 3]);
@@ -39,6 +39,15 @@ impl<'de> Deserialize<'de> for Station {
     {
         let value = String::deserialize(deserializer)?;
         Self::from_str(&value).map_err(D::Error::custom)
+    }
+}
+
+impl Serialize for Station {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
     }
 }
 
@@ -106,6 +115,12 @@ mod tests {
                 .to_string()
                 .contains("station code must be three uppercase ASCII letters")
         );
+    }
+
+    #[test]
+    fn serialize_formats_station_code() {
+        let station = Station::from_str("ABC").unwrap();
+        assert_eq!(serde_json::to_string(&station).unwrap(), r#""ABC""#);
     }
 
     #[test]

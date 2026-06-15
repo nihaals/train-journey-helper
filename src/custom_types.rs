@@ -20,6 +20,7 @@ pub enum NumberOfCarriages {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrainService {
+    pub service_id: String,
     pub from: TrainServiceStation,
     pub to: TrainServiceStation,
     pub company: String,
@@ -41,25 +42,5 @@ impl TrainService {
             .scheduled_arrival
             .duration_until(self.to.estimated_arrival)
             .as_mins()
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JourneyOption {
-    pub outbound_first_leg: TrainService,
-    pub outbound_second_leg: TrainService,
-    pub interchange_walk_minutes: u8,
-}
-
-impl JourneyOption {
-    pub fn arrives_at_destination(&self) -> Timestamp {
-        self.outbound_second_leg.to.estimated_arrival
-    }
-
-    pub fn is_delayed(&self) -> bool {
-        self.outbound_first_leg.departure_delay_minutes() > 0
-            || self.outbound_first_leg.arrival_delay_minutes() > 0
-            || self.outbound_second_leg.departure_delay_minutes() > 0
-            || self.outbound_second_leg.arrival_delay_minutes() > 0
     }
 }

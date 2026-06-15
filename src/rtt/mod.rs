@@ -86,6 +86,7 @@ impl RttClient {
         access_token: &str,
         unique_identity: &str,
     ) -> Result<api_types::service::Root> {
+        // TODO: Cache for less than poll time
         let unique_identity = unique_identity
             .strip_prefix("gb-nr:")
             .unwrap_or(unique_identity);
@@ -286,6 +287,7 @@ fn train_service_from_rtt(
     let number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
 
     Ok(Some(TrainService {
+        service_id: service.schedule_metadata.unique_identity.clone(),
         from: from_station,
         to: to_station,
         company: service.schedule_metadata.operator.name.clone(),
@@ -309,6 +311,7 @@ impl TrainProvider for RttClient {
         to: Station,
         not_before: Timestamp,
     ) -> Result<Vec<TrainService>> {
+        // TODO: Cache for less than poll time
         let access_token = self.access_token().await?;
         let response: api_types::location::Root = self
             .http
@@ -365,6 +368,18 @@ impl TrainProvider for RttClient {
 
         Ok(trains)
     }
+
+    async fn get_service(
+        &self,
+        service_id: &str,
+        from: Station,
+        to: Station,
+    ) -> Result<TrainService> {
+        let access_token = self.access_token().await?;
+        let service = self.service(&access_token, service_id).await?;
+        train_service_from_rtt(service.service, from, to)?
+            .context("Failed to get train service from RTT")
+    }
 }
 
 #[cfg(test)]
@@ -412,6 +427,7 @@ mod tests {
     ) -> api_types::service::Service {
         api_types::service::Service {
             schedule_metadata: api_types::service::ScheduleMetadata {
+                unique_identity: "service-id".to_owned(),
                 operator: api_types::service::Operator {
                     name: "Operator".to_owned(),
                 },

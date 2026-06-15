@@ -11,6 +11,8 @@ pub struct Config {
     pub stations: Stations,
     pub walk: WalkTimes,
     pub destination_arrival_time: Time,
+    // TODO: Use jiff::Span
+    pub destination_stay_estimate_minutes: u16,
     #[serde(deserialize_with = "deserialize_weekday")]
     pub travel_day: Weekday,
     pub listen_addr: SocketAddr,
@@ -100,6 +102,7 @@ mod tests {
                 "station_5_to_final_destination_minutes": 4
               },
               "destination_arrival_time": "09:30",
+              "destination_stay_estimate_minutes": 120,
               "travel_day": "monday",
               "listen_addr": "127.0.0.1:3000",
               "healthcheck_url": null,
@@ -121,5 +124,6 @@ mod tests {
             Time::new(9, 30, 0, 0).unwrap()
         );
         assert_eq!(config.travel_day, Weekday::Monday);
+        assert_eq!(config.destination_stay_estimate_minutes, 120);
     }
 }
