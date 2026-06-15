@@ -99,7 +99,7 @@ mod tests {
                 "station_4_to_3_minutes": 3,
                 "station_5_to_final_destination_minutes": 4
               },
-              "destination_arrival_time": "09:30:00.0",
+              "destination_arrival_time": "09:30",
               "travel_day": "monday",
               "listen_addr": "127.0.0.1:3000",
               "healthcheck_url": null,
