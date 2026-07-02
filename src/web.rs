@@ -93,7 +93,7 @@ struct ServiceRequest {
     service_id: String,
 }
 
-fn request_time(request: TimeRequest) -> Result<Timestamp> {
+fn request_time(request: &TimeRequest) -> Result<Timestamp> {
     Ok(request.time.to_london_zoned()?.timestamp())
 }
 
@@ -106,7 +106,7 @@ async fn get_leg_options(
     axum::Json(request): axum::Json<TimeRequest>,
     leg: app::JourneyLeg,
 ) -> Result<axum::Json<Vec<app::TrainResponse>>, StatusCode> {
-    let time = request_time(request).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let time = request_time(&request).map_err(|_| StatusCode::BAD_REQUEST)?;
     let options = app.trains_for_leg(leg, time).await.map_err(|error| {
         // TODO: Casing?
         tracing::error!(?error, "failed to get leg options");

@@ -1,4 +1,5 @@
 #![warn(clippy::clone_on_ref_ptr)]
+#![warn(clippy::needless_pass_by_value)]
 
 mod app;
 mod config;
