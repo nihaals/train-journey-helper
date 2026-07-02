@@ -19,4 +19,6 @@ pub trait TrainProvider {
         from: Station,
         to: Station,
     ) -> Result<TrainService>;
+
+    async fn purge_cache(&self);
 }

@@ -1,5 +1,7 @@
 mod api_types;
 
+use std::{collections::HashMap, sync::Arc};
+
 use anyhow::{Context, Result, bail, ensure};
 use jiff::{Span, Timestamp};
 use serde::Deserialize;
@@ -50,6 +52,15 @@ pub struct RttClient {
     http: reqwest::Client,
     config: RttConfig,
     access_token: Mutex<Option<String>>,
+    service_cache: Mutex<HashMap<String, Arc<api_types::service::Root>>>,
+    location_cache: Mutex<HashMap<LocationCacheKey, Arc<api_types::location::Root>>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct LocationCacheKey {
+    from: Station,
+    to: Station,
+    not_before: Timestamp,
 }
 
 impl RttClient {
@@ -85,23 +96,80 @@ impl RttClient {
         &self,
         access_token: &str,
         unique_identity: &str,
-    ) -> Result<api_types::service::Root> {
-        // TODO: Cache for less than poll time
+    ) -> Result<Arc<api_types::service::Root>> {
         let unique_identity = unique_identity
             .strip_prefix("gb-nr:")
             .unwrap_or(unique_identity);
-        self.http
-            .get("https://data.rtt.io/gb-nr/service")
-            .bearer_auth(access_token)
-            .query(&[("uniqueIdentity", unique_identity)])
-            .send()
+        if let Some(service) = self
+            .service_cache
+            .lock()
             .await
-            .context("Failed to send RTT service request")?
-            .error_for_status()
-            .context("Failed to get RTT service data")?
-            .json()
+            .get(unique_identity)
+            .cloned()
+        {
+            return Ok(service);
+        }
+
+        let response: Arc<api_types::service::Root> = Arc::new(
+            self.http
+                .get("https://data.rtt.io/gb-nr/service")
+                .bearer_auth(access_token)
+                .query(&[("uniqueIdentity", unique_identity)])
+                .send()
+                .await
+                .context("Failed to send RTT service request")?
+                .error_for_status()
+                .context("Failed to get RTT service data")?
+                .json()
+                .await
+                .context("Failed to deserialize RTT service response")?,
+        );
+        self.service_cache
+            .lock()
             .await
-            .context("Failed to deserialize RTT service response")
+            .insert(unique_identity.to_owned(), Arc::clone(&response));
+        Ok(response)
+    }
+
+    async fn location(
+        &self,
+        access_token: &str,
+        from: Station,
+        to: Station,
+        not_before: Timestamp,
+    ) -> Result<Arc<api_types::location::Root>> {
+        let key = LocationCacheKey {
+            from,
+            to,
+            not_before,
+        };
+        if let Some(location) = self.location_cache.lock().await.get(&key).cloned() {
+            return Ok(location);
+        }
+
+        let response: Arc<api_types::location::Root> = Arc::new(
+            self.http
+                .get("https://data.rtt.io/gb-nr/location")
+                .bearer_auth(access_token)
+                .query(&[
+                    ("code", from.as_str()),
+                    ("filterTo", to.as_str()),
+                    ("timeFrom", &not_before.to_string()),
+                ])
+                .send()
+                .await
+                .context("Failed to send RTT request")?
+                .error_for_status()
+                .context("Failed to get RTT data")?
+                .json()
+                .await
+                .context("Failed to deserialize RTT response")?,
+        );
+        self.location_cache
+            .lock()
+            .await
+            .insert(key, Arc::clone(&response));
+        Ok(response)
     }
 }
 
@@ -270,21 +338,21 @@ fn number_of_carriages_for_journey(
 }
 
 fn train_service_from_rtt(
-    service: api_types::service::Service,
+    service: &api_types::service::Service,
     from: Station,
     to: Station,
 ) -> Result<Option<TrainService>> {
-    let Some(from_station) = service_station(&service, from)? else {
+    let Some(from_station) = service_station(service, from)? else {
         return Ok(None);
     };
-    let Some(to_station) = service_station(&service, to)? else {
+    let Some(to_station) = service_station(service, to)? else {
         return Ok(None);
     };
     let destination = service
         .destination
         .first()
         .context("RTT service did not include destination")?;
-    let number_of_carriages = number_of_carriages_for_journey(&service, from, to)?;
+    let number_of_carriages = number_of_carriages_for_journey(service, from, to)?;
 
     Ok(Some(TrainService {
         service_id: service.schedule_metadata.unique_identity.clone(),
@@ -302,6 +370,8 @@ impl TrainProvider for RttClient {
             http: client,
             config: config.rtt.clone(),
             access_token: Mutex::new(None),
+            service_cache: Mutex::new(HashMap::new()),
+            location_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -311,28 +381,11 @@ impl TrainProvider for RttClient {
         to: Station,
         not_before: Timestamp,
     ) -> Result<Vec<TrainService>> {
-        // TODO: Cache for less than poll time
         let access_token = self.access_token().await?;
-        let response: api_types::location::Root = self
-            .http
-            .get("https://data.rtt.io/gb-nr/location")
-            .bearer_auth(&access_token)
-            .query(&[
-                ("code", from.as_str()),
-                ("filterTo", to.as_str()),
-                ("timeFrom", &not_before.to_string()),
-            ])
-            .send()
-            .await
-            .context("Failed to send RTT request")?
-            .error_for_status()
-            .context("Failed to get RTT data")?
-            .json()
-            .await
-            .context("Failed to deserialize RTT response")?;
+        let response = self.location(&access_token, from, to, not_before).await?;
 
         let mut trains = Vec::new();
-        for service in response.services {
+        for service in &response.services {
             if service.schedule_metadata.mode_type == "BUS" {
                 continue;
             }
@@ -346,7 +399,7 @@ impl TrainProvider for RttClient {
                 "RTT service mode type is not TRAIN"
             );
 
-            let departure_data = service.temporal_data.departure;
+            let departure_data = &service.temporal_data.departure;
             let Some(departure) = departure_data
                 .realtime_forecast
                 .or(departure_data.schedule_advertised)
@@ -361,7 +414,7 @@ impl TrainProvider for RttClient {
             let service = self
                 .service(&access_token, &service.schedule_metadata.unique_identity)
                 .await?;
-            if let Some(service) = train_service_from_rtt(service.service, from, to)? {
+            if let Some(service) = train_service_from_rtt(&service.service, from, to)? {
                 trains.push(service);
             }
         }
@@ -377,8 +430,13 @@ impl TrainProvider for RttClient {
     ) -> Result<TrainService> {
         let access_token = self.access_token().await?;
         let service = self.service(&access_token, service_id).await?;
-        train_service_from_rtt(service.service, from, to)?
+        train_service_from_rtt(&service.service, from, to)?
             .context("Failed to get train service from RTT")
+    }
+
+    async fn purge_cache(&self) {
+        self.service_cache.lock().await.clear();
+        self.location_cache.lock().await.clear();
     }
 }
 
@@ -502,7 +560,7 @@ mod tests {
             service_location("AAA", 8, true),
             service_location("BBB", 8, false),
         ]);
-        let service = train_service_from_rtt(service, station("AAA"), station("BBB")).unwrap();
+        let service = train_service_from_rtt(&service, station("AAA"), station("BBB")).unwrap();
         assert!(service.is_none());
     }
 
@@ -512,7 +570,7 @@ mod tests {
             service_location("AAA", 8, false),
             service_location("BBB", 8, true),
         ]);
-        let service = train_service_from_rtt(service, station("AAA"), station("BBB")).unwrap();
+        let service = train_service_from_rtt(&service, station("AAA"), station("BBB")).unwrap();
         assert!(service.is_none());
     }
 

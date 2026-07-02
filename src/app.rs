@@ -164,6 +164,8 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         // TODO: Add span?
         let mut initial_report_sent = false;
         loop {
+            self.provider.purge_cache().await;
+
             let now = Timestamp::now();
             let state = self.state.lock().await.clone();
             if matches!(state, JourneyState::SkippedDay | JourneyState::Complete) {
