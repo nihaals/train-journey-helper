@@ -31,13 +31,61 @@ pub struct JourneyNotifier<N> {
 }
 
 impl<N> JourneyNotifier<N> {
-    pub fn new(notifier: N) -> Self {
+    pub fn new(notifier: N, config: &Config) -> Self {
         Self {
             notifier,
             last_notification: Arc::new(Mutex::new(None)),
-            // TODO: Derive from journey config
-            status_tag: "train-journey-status".to_owned(),
+            status_tag: journey_tag(config),
         }
+    }
+}
+
+fn journey_tag(config: &Config) -> String {
+    let mut hash = StableHash::new();
+    hash.update_str(config.stations.home.as_str());
+    hash.update_str(config.stations.line_one_interchange_primary.as_str());
+    hash.update_str(
+        config
+            .stations
+            .line_one_interchange_return_preferred
+            .as_str(),
+    );
+    hash.update_str(config.stations.destination_line_interchange.as_str());
+    hash.update_str(config.stations.destination.as_str());
+    hash.update_str(&config.destination_arrival_time.to_string());
+    hash.update_str(&config.travel_day.to_monday_zero_offset().to_string());
+    let hash = hash.finish();
+    base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        hash.to_le_bytes(),
+    )
+}
+
+/// FNV-1a 32-bit implementation.
+struct StableHash(u32);
+
+impl StableHash {
+    const OFFSET_BASIS: u32 = 0x811c9dc5;
+    const PRIME: u32 = 0x01000193;
+
+    fn new() -> Self {
+        Self(Self::OFFSET_BASIS)
+    }
+
+    fn update_str(&mut self, value: &str) {
+        self.update(&value.len().to_le_bytes());
+        self.update(value.as_bytes());
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u32::from(*byte);
+            self.0 = self.0.wrapping_mul(Self::PRIME);
+        }
+    }
+
+    fn finish(self) -> u32 {
+        self.0
     }
 }
 

@@ -81,7 +81,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     pub fn new(config: Config, client: reqwest::Client) -> Self {
         Self {
             provider: P::new(&config, client.clone()),
-            notifier: JourneyNotifier::new(N::new(&config, client.clone())),
+            notifier: JourneyNotifier::new(N::new(&config, client.clone()), &config),
             http: client,
             config,
             state: Arc::new(Mutex::new(JourneyState::Waiting)),
