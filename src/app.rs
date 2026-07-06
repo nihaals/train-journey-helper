@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use jiff::{Timestamp, ToSpan, civil::Date};
+use jiff::{Timestamp, civil::Date};
 use serde::Serialize;
 use tokio::sync::Mutex;
 
@@ -203,9 +203,8 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         // cache or something
         let now = Timestamp::now();
         let target = self.destination_arrival_timestamp(now)?;
-        let latest_destination_train = target.checked_sub(
-            i64::from(self.config.walk.station_5_to_final_destination_minutes).minutes(),
-        )?;
+        let latest_destination_train =
+            target.checked_sub(self.config.walk.station_5_to_final_destination)?;
         let second = self
             .provider
             .departures_between(
@@ -223,7 +222,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         let latest_first_arrival = second
             .from
             .estimated_departure
-            .checked_sub(i64::from(self.config.walk.station_2_to_4_minutes).minutes())?;
+            .checked_sub(self.config.walk.station_2_to_4)?;
         let first = self
             .provider
             .departures_between(
@@ -240,7 +239,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         first
             .from
             .estimated_departure
-            .checked_sub(i64::from(self.config.walk.home_to_station_1_minutes).minutes())
+            .checked_sub(self.config.walk.home_to_station_1)
             .context("Failed to calculate monitoring start")
     }
 
@@ -248,7 +247,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         let outbound_first = self
             .trains_for_leg(
                 JourneyLeg::HomeToPrimaryInterchange,
-                now.checked_add(i64::from(self.config.walk.home_to_station_1_minutes).minutes())?,
+                now.checked_add(self.config.walk.home_to_station_1)?,
             )
             .await?;
         let outbound_second = self.best_second_leg_options(&outbound_first).await?;
@@ -275,9 +274,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 let first = self
                     .trains_for_leg(
                         JourneyLeg::HomeToPrimaryInterchange,
-                        now.checked_add(
-                            i64::from(self.config.walk.home_to_station_1_minutes).minutes(),
-                        )?,
+                        now.checked_add(self.config.walk.home_to_station_1)?,
                     )
                     .await?;
                 let second = self.best_second_leg_options(&first).await?;
@@ -287,7 +284,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 let start = selected
                     .to
                     .estimated_arrival
-                    .checked_add(i64::from(self.config.walk.station_2_to_4_minutes).minutes())?;
+                    .checked_add(self.config.walk.station_2_to_4)?;
                 let second = self
                     .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                     .await?;
@@ -311,11 +308,11 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 let start_3 = selected
                     .to
                     .estimated_arrival
-                    .checked_add(i64::from(self.config.walk.station_4_to_3_minutes).minutes())?;
+                    .checked_add(self.config.walk.station_4_to_3)?;
                 let start_2 = selected
                     .to
                     .estimated_arrival
-                    .checked_add(i64::from(self.config.walk.station_2_to_4_minutes).minutes())?;
+                    .checked_add(self.config.walk.station_2_to_4)?;
                 let mut trains = self
                     .trains_for_leg(JourneyLeg::ReturnPreferredInterchangeToHome, start_3)
                     .await?;
@@ -351,14 +348,15 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             let start = first
                 .to
                 .estimated_arrival
-                .checked_add(i64::from(self.config.walk.station_2_to_4_minutes).minutes())?;
+                .checked_add(self.config.walk.station_2_to_4)?;
             for train in self
                 .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                 .await?
             {
-                let after_walk = train.to.estimated_arrival.checked_add(
-                    i64::from(self.config.walk.station_5_to_final_destination_minutes).minutes(),
-                )?;
+                let after_walk = train
+                    .to
+                    .estimated_arrival
+                    .checked_add(self.config.walk.station_5_to_final_destination)?;
                 let too_early =
                     after_walk.duration_until(target).as_mins() > MAX_EARLY_DESTINATION_MINUTES;
                 if after_walk <= target
@@ -385,11 +383,11 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             let start_3 = first
                 .to
                 .estimated_arrival
-                .checked_add(i64::from(self.config.walk.station_4_to_3_minutes).minutes())?;
+                .checked_add(self.config.walk.station_4_to_3)?;
             let start_2 = first
                 .to
                 .estimated_arrival
-                .checked_add(i64::from(self.config.walk.station_2_to_4_minutes).minutes())?;
+                .checked_add(self.config.walk.station_2_to_4)?;
             second.extend(
                 self.trains_for_leg(JourneyLeg::ReturnPreferredInterchangeToHome, start_3)
                     .await?,
@@ -417,7 +415,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     fn return_start_time(&self, now: Timestamp) -> Result<Timestamp> {
         let destination_arrival = self.destination_arrival_timestamp(now)?;
         Ok(destination_arrival
-            .checked_add(i64::from(self.config.destination_stay_estimate_minutes).minutes())?
+            .checked_add(self.config.destination_stay_estimate)?
             .max(now))
     }
 

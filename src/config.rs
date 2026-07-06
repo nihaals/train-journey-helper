@@ -1,7 +1,10 @@
 use std::{fs, net::SocketAddr, path::Path};
 
 use anyhow::{Context, Result};
-use jiff::civil::{Time, Weekday};
+use jiff::{
+    Span,
+    civil::{Time, Weekday},
+};
 use serde::{Deserialize, Deserializer, de::Error};
 
 use crate::station::Station;
@@ -11,8 +14,11 @@ pub struct Config {
     pub stations: Stations,
     pub walk: WalkTimes,
     pub destination_arrival_time: Time,
-    // TODO: Use jiff::Span
-    pub destination_stay_estimate_minutes: u16,
+    #[serde(
+        rename = "destination_stay_estimate_minutes",
+        deserialize_with = "deserialize_minutes_span"
+    )]
+    pub destination_stay_estimate: jiff::Span,
     #[serde(deserialize_with = "deserialize_weekday")]
     pub travel_day: Weekday,
     pub listen_addr: SocketAddr,
@@ -48,10 +54,37 @@ pub struct Stations {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WalkTimes {
-    pub home_to_station_1_minutes: u8,
-    pub station_2_to_4_minutes: u8,
-    pub station_4_to_3_minutes: u8,
-    pub station_5_to_final_destination_minutes: u8,
+    #[serde(
+        rename = "home_to_station_1_minutes",
+        deserialize_with = "deserialize_minutes_span"
+    )]
+    pub home_to_station_1: jiff::Span,
+    #[serde(
+        rename = "station_2_to_4_minutes",
+        deserialize_with = "deserialize_minutes_span"
+    )]
+    pub station_2_to_4: jiff::Span,
+    #[serde(
+        rename = "station_4_to_3_minutes",
+        deserialize_with = "deserialize_minutes_span"
+    )]
+    pub station_4_to_3: jiff::Span,
+    #[serde(
+        rename = "station_5_to_final_destination_minutes",
+        deserialize_with = "deserialize_minutes_span"
+    )]
+    pub station_5_to_final_destination: jiff::Span,
+}
+
+fn deserialize_minutes_span<'de, D>(deserializer: D) -> Result<Span, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let minutes = i64::deserialize(deserializer)?;
+    if minutes <= 0 {
+        return Err(D::Error::custom("minutes must be a positive number"));
+    }
+    Ok(Span::new().minutes(minutes))
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,7 +112,10 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use jiff::civil::{Time, Weekday};
+    use jiff::{
+        Span,
+        civil::{Time, Weekday},
+    };
 
     use super::Config;
 
@@ -124,6 +160,9 @@ mod tests {
             Time::new(9, 30, 0, 0).unwrap()
         );
         assert_eq!(config.travel_day, Weekday::Monday);
-        assert_eq!(config.destination_stay_estimate_minutes, 120);
+        assert_eq!(
+            config.destination_stay_estimate.fieldwise(),
+            Span::new().minutes(120).fieldwise(),
+        );
     }
 }
