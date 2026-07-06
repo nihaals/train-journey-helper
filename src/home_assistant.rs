@@ -21,9 +21,7 @@ struct NotifyRequest<'a> {
 
 #[derive(Debug, Serialize)]
 struct NotifyData<'a> {
-    // TODO: Tag should be the same for all notifications related to the same journey/day
     tag: &'a str,
-    // TODO: Static
     group: Option<&'a str>,
 }
 
