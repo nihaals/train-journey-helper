@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use jiff::Timestamp;
 use tokio::sync::Mutex;
 
-use crate::{config::Config, custom_types::TrainService, timezone::TimestampExt};
+use crate::{
+    config::Config, custom_types::TrainService, provider::TrainServices, timezone::TimestampExt,
+};
 
 pub trait Notifier {
     fn new(config: &Config, client: reqwest::Client) -> Self;
@@ -92,10 +94,10 @@ impl StableHash {
 impl<N: Notifier> JourneyNotifier<N> {
     pub async fn send_status_report(
         &self,
-        outbound_first: &[TrainService],
-        outbound_second: &[TrainService],
-        return_first: &[TrainService],
-        return_second: &[TrainService],
+        outbound_first: &TrainServices,
+        outbound_second: &TrainServices,
+        return_first: &TrainServices,
+        return_second: &TrainServices,
     ) -> Result<()> {
         let mut message = String::from("Outbound today:\n");
         append_services(&mut message, "First leg", outbound_first)?;
@@ -104,20 +106,18 @@ impl<N: Notifier> JourneyNotifier<N> {
         if return_first.is_empty() || return_second.is_empty() {
             message.push_str("no complete train route found around estimated leave time.\n");
         } else {
-            ensure!(return_first.is_sorted_by_key(|service| service.from.estimated_departure));
-            ensure!(return_second.is_sorted_by_key(|service| service.from.estimated_departure));
             message.push_str(&format!(
                 "trains seen around {}-{} for the way home.\n",
                 format_time(
                     return_first
-                        .first()
+                        .first_by_departure()
                         .expect("checked non-empty")
                         .from
                         .estimated_departure
                 )?,
                 format_time(
                     return_second
-                        .last()
+                        .last_by_departure()
                         .expect("checked non-empty")
                         .to
                         .estimated_arrival
@@ -129,8 +129,8 @@ impl<N: Notifier> JourneyNotifier<N> {
 
     pub async fn send_outbound_update(
         &self,
-        first: &[TrainService],
-        second: &[TrainService],
+        first: &TrainServices,
+        second: &TrainServices,
     ) -> Result<()> {
         let mut message = String::from("Outbound options:\n");
         append_services(&mut message, "First leg", first)?;
@@ -140,8 +140,8 @@ impl<N: Notifier> JourneyNotifier<N> {
 
     pub async fn send_return_update(
         &self,
-        first: &[TrainService],
-        second: &[TrainService],
+        first: &TrainServices,
+        second: &TrainServices,
     ) -> Result<()> {
         let mut message = String::from("Return options:\n");
         append_services(&mut message, "First leg", first)?;
@@ -149,7 +149,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.send_if_changed(&message).await
     }
 
-    pub async fn send_leg_update(&self, heading: &str, services: &[TrainService]) -> Result<()> {
+    pub async fn send_leg_update(&self, heading: &str, services: &TrainServices) -> Result<()> {
         let mut message = format!("{heading}:\n");
         append_services(&mut message, "Options", services)?;
         self.send_if_changed(&message).await
@@ -196,15 +196,14 @@ impl<N: Notifier> JourneyNotifier<N> {
     }
 }
 
-fn append_services(message: &mut String, heading: &str, services: &[TrainService]) -> Result<()> {
-    ensure!(services.is_sorted_by_key(|service| service.from.estimated_departure));
+fn append_services(message: &mut String, heading: &str, services: &TrainServices) -> Result<()> {
     message.push_str(heading);
     message.push_str(":\n");
     if services.is_empty() {
         message.push_str("- none found\n");
         return Ok(());
     }
-    for service in services.iter().take(4) {
+    for service in services.first_n_by_departure(4) {
         message.push_str("- ");
         message.push_str(&format_service(service)?);
         message.push('\n');

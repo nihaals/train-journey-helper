@@ -9,14 +9,13 @@ use crate::{
     config::Config,
     custom_types::TrainService,
     notifier::{JourneyNotifier, Notifier},
-    provider::TrainProvider,
+    provider::{TrainProvider, TrainServices},
     station::Station,
     timezone::{DateTimeExt, TimestampExt},
 };
 
 // TODO: Move to config?
 const POLL_SECONDS: u64 = 60;
-const LEG_OPTIONS: usize = 6;
 const MAX_EARLY_DESTINATION_MINUTES: i64 = 30;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,15 +132,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         &self,
         leg: JourneyLeg,
         not_before: Timestamp,
-    ) -> Result<Vec<TrainService>> {
+    ) -> Result<TrainServices> {
         let (from, to) = self.leg_stations(leg);
-        Ok(self
-            .provider
-            .departures_between(from, to, not_before)
-            .await?
-            .into_iter()
-            .take(LEG_OPTIONS)
-            .collect())
+        Ok(TrainServices::new(
+            self.provider
+                .departures_between(from, to, not_before)
+                .await?,
+        ))
     }
 
     pub async fn send_last_notification(&self) -> Result<bool> {
@@ -320,8 +317,6 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     self.trains_for_leg(JourneyLeg::PrimaryInterchangeToHome, start_2)
                         .await?,
                 );
-                trains.sort_by_key(|train| train.to.estimated_arrival);
-                trains.truncate(LEG_OPTIONS);
                 self.notifier
                     .send_leg_update("Next return leg", &trains)
                     .await
@@ -336,15 +331,11 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         }
     }
 
-    async fn best_second_leg_options(
-        &self,
-        first_legs: &[TrainService],
-    ) -> Result<Vec<TrainService>> {
-        let mut second = Vec::new();
+    async fn best_second_leg_options(&self, first_legs: &TrainServices) -> Result<TrainServices> {
+        let mut second = TrainServices::new_empty();
         // TODO: Not `now` as an argument?
         let target = self.destination_arrival_timestamp(Timestamp::now())?;
-        // TODO: Make `Vec` wrapper which handles sorting
-        for first in first_legs.iter().take(3) {
+        for first in first_legs.first_n_by_arrival(3) {
             let start = first
                 .to
                 .estimated_arrival
@@ -352,6 +343,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             for train in self
                 .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                 .await?
+                .into_iter_by_arrival()
             {
                 let after_walk = train
                     .to
@@ -359,27 +351,21 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .checked_add(self.config.walk.station_5_to_final_destination)?;
                 let too_early =
                     after_walk.duration_until(target).as_mins() > MAX_EARLY_DESTINATION_MINUTES;
-                if after_walk <= target
-                    && !too_early
-                    && !second
-                        .iter()
-                        .any(|seen: &TrainService| seen.service_id == train.service_id)
-                {
+                if after_walk <= target && !too_early {
                     second.push(train);
                 }
             }
         }
-        second.sort_by_key(|train| train.to.estimated_arrival);
-        second.truncate(LEG_OPTIONS);
+        second.dedup_by_service_id();
         Ok(second)
     }
 
     async fn best_return_second_leg_options(
         &self,
-        first_legs: &[TrainService],
-    ) -> Result<Vec<TrainService>> {
-        let mut second = Vec::new();
-        for first in first_legs.iter().take(3) {
+        first_legs: &TrainServices,
+    ) -> Result<TrainServices> {
+        let mut second = TrainServices::new_empty();
+        for first in first_legs.first_n_by_arrival(3) {
             let start_3 = first
                 .to
                 .estimated_arrival
@@ -397,10 +383,8 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .await?,
             );
         }
-        second.sort_by_key(|train| train.to.estimated_arrival);
         // TODO: Prefer return preferred which have the same service ID, could sort by `from`
-        second.dedup_by(|a, b| a.service_id == b.service_id);
-        second.truncate(LEG_OPTIONS);
+        second.dedup_by_service_id();
         Ok(second)
     }
 

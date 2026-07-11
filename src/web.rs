@@ -112,9 +112,9 @@ fn get_leg_options(leg: app::JourneyLeg) -> MethodRouter<AppState> {
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
             Ok::<_, StatusCode>(axum::Json(
+                // TODO: If this was an iterator we wouldn't use all of it
                 options
-                    .iter()
-                    .cloned()
+                    .into_iter_by_departure()
                     .map(app::TrainResponse::from)
                     .collect::<Vec<_>>(),
             ))
