@@ -12,7 +12,7 @@ pub struct TrainServiceStation {
     pub platform: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumberOfCarriages {
     SameThroughout(u8),
     Varies { minimum: u8, at_from: u8 },
