@@ -356,7 +356,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 }
             }
         }
-        second.dedup_by_service_id();
+        second.dedup_by_service_id(&self.config.stations);
         Ok(second)
     }
 
@@ -383,8 +383,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .await?,
             );
         }
-        // TODO: Prefer return preferred which have the same service ID, could sort by `from`
-        second.dedup_by_service_id();
+        second.dedup_by_service_id(&self.config.stations);
         Ok(second)
     }
 

@@ -1,9 +1,13 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use anyhow::Result;
 use jiff::Timestamp;
 
-use crate::{config::Config, custom_types::TrainService, station::Station};
+use crate::{
+    config::{Config, Stations},
+    custom_types::TrainService,
+    station::Station,
+};
 
 pub trait TrainProvider {
     fn new(config: &Config, client: reqwest::Client) -> Self;
@@ -34,14 +38,13 @@ pub struct TrainServices {
 }
 
 impl TrainServices {
-    pub fn new(mut vec: Vec<TrainService>) -> Self {
-        vec.sort_by_key(|train| train.to.estimated_arrival);
-        let mut by_departure = vec.clone();
-        by_departure.sort_by_key(|train| train.from.estimated_departure);
-        Self {
-            by_arrival: vec,
-            by_departure,
-        }
+    pub fn new(vec: Vec<TrainService>) -> Self {
+        let mut services = Self {
+            by_arrival: vec.clone(),
+            by_departure: vec,
+        };
+        services.sort();
+        services
     }
 
     pub fn new_empty() -> Self {
@@ -70,20 +73,30 @@ impl TrainServices {
 
     fn sort(&mut self) {
         self.by_arrival
-            .sort_by_key(|train| train.to.estimated_arrival);
+            .sort_by_key(|train| (train.to.estimated_arrival, train.from.estimated_departure));
         self.by_departure
-            .sort_by_key(|train| train.from.estimated_departure);
+            .sort_by_key(|train| (train.from.estimated_departure, train.to.estimated_arrival));
     }
 
-    /// Removes duplicate services based on `service_id`, keeping the first occurrence when sorting
-    /// by arrival.
-    pub fn dedup_by_service_id(&mut self) {
-        let mut service_ids = HashSet::new();
-        self.by_arrival
-            .retain(|service| service_ids.insert(service.service_id.clone()));
-        self.by_departure = self.by_arrival.clone();
-        self.by_departure
-            .sort_by_key(|train| train.from.estimated_departure);
+    /// Removes duplicate services based on `service_id`, preferring services departing from the
+    /// return-preferred interchange and otherwise keeping the first occurrence by arrival.
+    pub fn dedup_by_service_id(&mut self, stations: &Stations) {
+        let mut service_indices: HashMap<String, usize> = HashMap::new();
+        let mut deduplicated: Vec<TrainService> = Vec::with_capacity(self.by_arrival.len());
+        for service in self.by_arrival.drain(..) {
+            if let Some(&index) = service_indices.get(&service.service_id) {
+                if service.from.station == stations.line_one_interchange_return_preferred
+                    && deduplicated[index].from.station
+                        != stations.line_one_interchange_return_preferred
+                {
+                    deduplicated[index] = service;
+                }
+            } else {
+                service_indices.insert(service.service_id.clone(), deduplicated.len());
+                deduplicated.push(service);
+            }
+        }
+        *self = Self::new(deduplicated);
     }
 
     pub fn first_by_departure(&self) -> Option<&TrainService> {
@@ -108,5 +121,106 @@ impl TrainServices {
 
     pub fn into_iter_by_departure(self) -> std::vec::IntoIter<TrainService> {
         self.by_departure.into_iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+    use crate::custom_types::{NumberOfCarriages, TrainServiceStation};
+
+    fn station(code: &str) -> Station {
+        Station::from_str(code).unwrap()
+    }
+
+    fn stations() -> Stations {
+        Stations {
+            home: station("HOM"),
+            line_one_interchange_primary: station("PRI"),
+            line_one_interchange_return_preferred: station("PRE"),
+            destination_line_interchange: station("INT"),
+            destination: station("DST"),
+        }
+    }
+
+    fn service(service_id: &str, from: &str, departure: i64, arrival: i64) -> TrainService {
+        let departure = Timestamp::from_second(departure).unwrap();
+        let arrival = Timestamp::from_second(arrival).unwrap();
+        TrainService {
+            service_id: service_id.to_owned(),
+            from: TrainServiceStation {
+                station: station(from),
+                scheduled_arrival: departure,
+                estimated_arrival: departure,
+                scheduled_departure: departure,
+                estimated_departure: departure,
+                platform: None,
+            },
+            to: TrainServiceStation {
+                station: station("HOM"),
+                scheduled_arrival: arrival,
+                estimated_arrival: arrival,
+                scheduled_departure: arrival,
+                estimated_departure: arrival,
+                platform: None,
+            },
+            company: "Company".to_owned(),
+            route_destination: "Home".to_owned(),
+            number_of_carriages: NumberOfCarriages::SameThroughout(4),
+        }
+    }
+
+    #[test]
+    fn dedup_by_service_id_prefers_return_preferred_interchange() {
+        let mut services = TrainServices::new(vec![
+            service("duplicate", "PRI", 10, 20),
+            service("duplicate", "PRE", 15, 20),
+        ]);
+
+        {
+            let services = services.first_n_by_arrival(2);
+            assert_eq!(services.len(), 2);
+            assert_eq!(services[0].from.station, station("PRI"));
+            assert_eq!(services[1].from.station, station("PRE"));
+        }
+
+        services.dedup_by_service_id(&stations());
+
+        let services = services.first_n_by_arrival(2);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].from.station, station("PRE"));
+    }
+
+    #[test]
+    fn dedup_by_service_id_keeps_first_by_arrival_without_preferred_interchange() {
+        let mut services = TrainServices::new(vec![
+            service("duplicate", "INT", 15, 20),
+            service("duplicate", "PRI", 10, 20),
+        ]);
+
+        services.dedup_by_service_id(&stations());
+
+        let services = services.first_n_by_arrival(2);
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0].from.station, station("PRI"));
+    }
+
+    #[test]
+    fn dedup_by_service_id_orders_results_by_arrival() {
+        let mut services = TrainServices::new(vec![
+            service("duplicate", "PRI", 10, 20),
+            service("other", "INT", 20, 22),
+            service("duplicate", "PRE", 15, 20),
+        ]);
+
+        services.dedup_by_service_id(&stations());
+
+        let services = services.first_n_by_arrival(3);
+        assert_eq!(services.len(), 2);
+        assert_eq!(services[0].service_id, "duplicate");
+        assert_eq!(services[0].from.station, station("PRE"));
+        assert_eq!(services[1].service_id, "other");
     }
 }
