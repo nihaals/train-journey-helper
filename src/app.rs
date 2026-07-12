@@ -21,6 +21,7 @@ const MAX_EARLY_DESTINATION_MINUTES: i64 = 30;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JourneyState {
     Waiting,
+    WaitingForNextJourney { resume_at: Timestamp },
     OnTrainHomeToPrimaryInterchange { selected: TrainService },
     OnTrainInterchangeToDestination { selected: TrainService },
     AtDestination,
@@ -164,12 +165,20 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             self.provider.purge_cache().await;
 
             let now = Timestamp::now();
-            let state = self.state.lock().await.clone();
-            if matches!(state, JourneyState::SkippedDay | JourneyState::Complete) {
-                self.send_healthcheck().await?;
-                // TODO: We need to send a healthcheck forever
-                // TODO: We need to handle going from complete to waiting for next week
-                break;
+            let mut state = self.state.lock().await.clone();
+            match state {
+                JourneyState::SkippedDay | JourneyState::Complete => {
+                    state = JourneyState::WaitingForNextJourney {
+                        resume_at: self.next_journey_start(now)?,
+                    };
+                    self.set_state(state.clone()).await;
+                }
+                JourneyState::WaitingForNextJourney { resume_at } if now >= resume_at => {
+                    state = JourneyState::Waiting;
+                    self.set_state(state.clone()).await;
+                    initial_report_sent = false;
+                }
+                _ => {}
             }
 
             if self.should_poll(now, &state).await? {
@@ -184,13 +193,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             self.send_healthcheck().await?;
             tokio::time::sleep(std::time::Duration::from_secs(POLL_SECONDS)).await;
         }
-        Ok(())
     }
 
     async fn should_poll(&self, now: Timestamp, state: &JourneyState) -> Result<bool> {
         Ok(match state {
             JourneyState::Waiting => now >= self.monitoring_start_time().await?,
-            // TODO: Still check for complete
+            // Checking if we should roll over is handled elsewhere
+            JourneyState::WaitingForNextJourney { .. } => false,
             _ => true,
         })
     }
@@ -327,7 +336,9 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .send_selected_train_update("On final return leg", selected)
                     .await
             }
-            JourneyState::SkippedDay | JourneyState::Complete => Ok(()),
+            JourneyState::WaitingForNextJourney { .. }
+            | JourneyState::SkippedDay
+            | JourneyState::Complete => Ok(()),
         }
     }
 
@@ -402,6 +413,14 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .max(now))
     }
 
+    fn next_journey_start(&self, now: Timestamp) -> Result<Timestamp> {
+        let date = next_weekday(
+            now.to_london_zoned().date().tomorrow()?,
+            self.config.travel_day,
+        );
+        Ok(date.at(0, 0, 0, 0).to_london_zoned()?.timestamp())
+    }
+
     fn leg_stations(&self, leg: JourneyLeg) -> (Station, Station) {
         match leg {
             JourneyLeg::HomeToPrimaryInterchange => (
@@ -446,7 +465,6 @@ impl From<TrainService> for TrainResponse {
 }
 
 fn next_weekday(mut date: Date, weekday: jiff::civil::Weekday) -> Date {
-    // TODO: Audit usages for handling being in `Waiting` after journey
     while date.weekday() != weekday {
         date = date.tomorrow().expect("next day should be in range");
     }
