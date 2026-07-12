@@ -71,7 +71,7 @@ fn router(app: AppState) -> Router {
             "/status/on-train/primary-interchange-to-home",
             set_on_train(app::JourneyLeg::PrimaryInterchangeToHome),
         )
-        .route("/status/skip-day", axum::routing::post(set_skip_day))
+        .route("/status/skip-day", axum::routing::post(set_complete))
         .route(
             "/status/at-destination",
             axum::routing::post(set_at_destination),
@@ -134,11 +134,6 @@ fn set_on_train(leg: app::JourneyLeg) -> MethodRouter<AppState> {
             }
         },
     )
-}
-
-async fn set_skip_day(State(app): AppStateState) -> StatusCode {
-    app.set_state(JourneyState::SkippedDay).await;
-    StatusCode::NO_CONTENT
 }
 
 async fn set_at_destination(State(app): AppStateState) -> StatusCode {

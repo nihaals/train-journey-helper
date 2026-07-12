@@ -28,9 +28,8 @@ pub enum JourneyState {
     OnTrainDestinationToInterchange { selected: TrainService },
     OnTrainReturnPreferredInterchangeToHome { selected: TrainService },
     OnTrainPrimaryInterchangeToHome { selected: TrainService },
+    // TODO: Replace with `WaitingForNextJourney`?
     Complete,
-    // TODO: Delete?
-    SkippedDay,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -167,7 +166,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             let now = Timestamp::now();
             let mut state = self.state.lock().await.clone();
             match state {
-                JourneyState::SkippedDay | JourneyState::Complete => {
+                JourneyState::Complete => {
                     state = JourneyState::WaitingForNextJourney {
                         resume_at: self.next_journey_start(now)?,
                     };
@@ -336,9 +335,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .send_selected_train_update("On final return leg", selected)
                     .await
             }
-            JourneyState::WaitingForNextJourney { .. }
-            | JourneyState::SkippedDay
-            | JourneyState::Complete => Ok(()),
+            JourneyState::WaitingForNextJourney { .. } | JourneyState::Complete => Ok(()),
         }
     }
 
