@@ -223,10 +223,9 @@ fn format_service(service: &TrainService) -> Result<String> {
     if let Some(platform) = &service.from.platform {
         text.push_str(&format!(" plat {platform}"));
     }
-    // TODO: Include negatives
-    if service.departure_delay_minutes() > 0 || service.arrival_delay_minutes() > 0 {
+    if service.departure_delay_minutes() != 0 || service.arrival_delay_minutes() != 0 {
         text.push_str(&format!(
-            " delay +{}/+{}m",
+            " delay {:+}/{:+}m",
             service.departure_delay_minutes(),
             service.arrival_delay_minutes()
         ));
