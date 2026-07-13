@@ -196,17 +196,16 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
 
     async fn should_poll(&self, now: Timestamp, state: &JourneyState) -> Result<bool> {
         Ok(match state {
-            JourneyState::Waiting => now >= self.monitoring_start_time().await?,
+            JourneyState::Waiting => now >= self.monitoring_start_time(now).await?,
             // Checking if we should roll over is handled elsewhere
             JourneyState::WaitingForNextJourney { .. } => false,
             _ => true,
         })
     }
 
-    async fn monitoring_start_time(&self) -> Result<Timestamp> {
+    async fn monitoring_start_time(&self, now: Timestamp) -> Result<Timestamp> {
         // TODO: We shouldn't be doing RTT API calls every minute while in `JourneyState::Waiting`,
         // cache or something
-        let now = Timestamp::now();
         let target = self.destination_arrival_timestamp(now)?;
         let latest_destination_train =
             target.checked_sub(self.config.walk.station_5_to_final_destination)?;
@@ -255,7 +254,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 now.checked_add(self.config.walk.home_to_station_1)?,
             )
             .await?;
-        let outbound_second = self.best_second_leg_options(&outbound_first).await?;
+        let outbound_second = self.best_second_leg_options(&outbound_first, now).await?;
         let return_start = self.return_start_time(now)?;
         let return_first = self
             .trains_for_leg(JourneyLeg::DestinationToInterchange, return_start)
@@ -282,7 +281,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                         now.checked_add(self.config.walk.home_to_station_1)?,
                     )
                     .await?;
-                let second = self.best_second_leg_options(&first).await?;
+                let second = self.best_second_leg_options(&first, now).await?;
                 self.notifier.send_outbound_update(&first, &second).await
             }
             JourneyState::OnTrainHomeToPrimaryInterchange { selected } => {
@@ -339,10 +338,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         }
     }
 
-    async fn best_second_leg_options(&self, first_legs: &TrainServices) -> Result<TrainServices> {
+    async fn best_second_leg_options(
+        &self,
+        first_legs: &TrainServices,
+        now: Timestamp,
+    ) -> Result<TrainServices> {
         let mut second = TrainServices::new_empty();
-        // TODO: Not `now` as an argument?
-        let target = self.destination_arrival_timestamp(Timestamp::now())?;
+        let target = self.destination_arrival_timestamp(now)?;
         for first in first_legs.first_n_by_arrival(3) {
             let start = first
                 .to
