@@ -17,9 +17,10 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 use jiff::{Timestamp, civil::DateTime};
+use tokio::task::JoinSet;
 
 use crate::{
     app::App, config::Config, home_assistant::HomeAssistantNotifier, notifier::Notifier,
@@ -192,16 +193,34 @@ async fn run(config_path: &Path) -> Result<()> {
     let app = Arc::new(App::<RttClient, HomeAssistantNotifier>::new(config, client));
     app.send_healthcheck().await?;
 
-    let scheduler = Arc::clone(&app);
-    // TODO: Use JoinSet
-    tokio::spawn(async move {
-        if let Err(error) = scheduler.run_scheduler().await {
-            tracing::error!(?error, "scheduler failed");
+    let listener = tokio::net::TcpListener::bind(app.config.listen_addr).await?;
+    tracing::info!(addr = %app.config.listen_addr, "listening");
+
+    let mut join_set = JoinSet::new();
+    join_set.spawn({
+        let app = Arc::clone(&app);
+        async move {
+            match app.run_scheduler().await {
+                Ok(()) => Err(anyhow!("Scheduler exited")),
+                Err(error) => Err(error).context("Scheduler failed"),
+            }
+        }
+    });
+    join_set.spawn(async move {
+        match web::serve(listener, app).await {
+            Ok(()) => Err(anyhow!("HTTP server exited")),
+            Err(error) => Err(error).context("HTTP server failed"),
         }
     });
 
-    let listener = tokio::net::TcpListener::bind(app.config.listen_addr).await?;
-    tracing::info!(addr = %app.config.listen_addr, "listening");
-    web::serve(listener, app).await?;
-    Ok(())
+    let first_finished = join_set.join_next().await;
+    join_set.abort_all();
+    join_set.join_next().await;
+
+    match first_finished {
+        Some(Ok(Ok(()))) => Ok(()),
+        Some(Ok(Err(error))) => Err(error),
+        Some(Err(join_error)) => Err(anyhow!(join_error).context("Failed to join task")),
+        None => unreachable!("JoinSet should have at least one task running"),
+    }
 }

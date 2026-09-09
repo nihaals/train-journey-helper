@@ -1,4 +1,4 @@
-use std::{future::IntoFuture, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{Router, extract::State, http::StatusCode, routing::MethodRouter};
@@ -17,14 +17,12 @@ use crate::{
 type AppState = Arc<App<RttClient, HomeAssistantNotifier>>;
 type AppStateState = State<AppState>;
 
-pub fn serve(
-    listener: TcpListener,
-    app: AppState,
-) -> impl IntoFuture<Output = std::io::Result<()>> {
+pub async fn serve(listener: TcpListener, app: AppState) -> std::io::Result<()> {
     let router = router(app);
     axum::serve(listener, router)
         // TODO: Investigate
         .with_graceful_shutdown(shutdown_signal())
+        .await
 }
 
 fn router(app: AppState) -> Router {
