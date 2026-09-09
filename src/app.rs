@@ -88,7 +88,7 @@ pub struct App<P, N> {
     http: reqwest::Client,
     provider: P,
     notifier: JourneyNotifier<N>,
-    state: Arc<Mutex<JourneyState>>,
+    state: Mutex<JourneyState>,
     monitoring_start_cache: Mutex<Option<CachedMonitoringStart>>,
 }
 
@@ -99,7 +99,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             notifier: JourneyNotifier::new(N::new(&config, client.clone()), &config),
             http: client,
             config,
-            state: Arc::new(Mutex::new(JourneyState::Waiting)),
+            state: Mutex::new(JourneyState::Waiting),
             monitoring_start_cache: Mutex::new(None),
         }
     }
