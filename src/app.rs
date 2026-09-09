@@ -151,11 +151,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         not_before: Timestamp,
     ) -> Result<TrainServices> {
         let (from, to) = self.leg_stations(leg);
-        Ok(TrainServices::new(
-            self.provider
-                .departures_between(from, to, not_before)
-                .await?,
-        ))
+        self.provider.departures_between(from, to, not_before).await
     }
 
     pub async fn send_last_notification(&self) -> Result<bool> {
@@ -271,10 +267,9 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 // TODO: Document assumptions on `now`, maybe use something better if needed?
                 now,
             )
-            .await?
-            .into_iter()
-            .rev()
-            .find(|train| train.to.estimated_arrival <= latest_destination_train)
+            .await?;
+        let second = second
+            .last_arriving_before(latest_destination_train)
             // TODO: What if we have to restart during a journey? Applies less to this one
             .context("No destination-leg train can reach the destination in time")?;
         let latest_first_arrival = second
@@ -288,10 +283,9 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 self.config.stations.line_one_interchange_primary,
                 now,
             )
-            .await?
-            .into_iter()
-            .rev()
-            .find(|train| train.to.estimated_arrival <= latest_first_arrival)
+            .await?;
+        let first = first
+            .last_arriving_before(latest_first_arrival)
             .context("No first-leg train can make the destination train")?;
         // TODO: We're just returning the latest we can leave home, not when to start monitoring
         first
@@ -588,7 +582,7 @@ mod tests {
             from: Station,
             to: Station,
             not_before: Timestamp,
-        ) -> Result<Vec<TrainService>> {
+        ) -> Result<TrainServices> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             let date = not_before.to_london_zoned().date();
             let mut trains = Vec::new();
@@ -610,7 +604,7 @@ mod tests {
                     arrival,
                 ));
             }
-            Ok(trains)
+            Ok(TrainServices::new(trains))
         }
 
         async fn get_service(

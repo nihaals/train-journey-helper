@@ -17,8 +17,7 @@ pub trait TrainProvider {
         from: Station,
         to: Station,
         not_before: Timestamp,
-        // TODO: Consider switching to iterator or `TrainServices`
-    ) -> Result<Vec<TrainService>>;
+    ) -> Result<TrainServices>;
 
     async fn get_service(
         &self,
@@ -113,6 +112,14 @@ impl TrainServices {
 
     pub fn last_by_departure(&self) -> Option<&TrainService> {
         self.by_departure.last()
+    }
+
+    /// Returns the latest-arriving service which arrives at or before `deadline`.
+    pub fn last_arriving_before(&self, deadline: Timestamp) -> Option<&TrainService> {
+        self.by_arrival
+            .iter()
+            .rev()
+            .find(|train| train.to.estimated_arrival <= deadline)
     }
 
     pub fn into_iter_by_arrival(self) -> std::vec::IntoIter<TrainService> {

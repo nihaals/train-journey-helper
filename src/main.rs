@@ -167,7 +167,9 @@ async fn main() -> Result<()> {
                 let trains = provider
                     .departures_between(from, to, not_before)
                     .await
-                    .context("Failed to get trains")?;
+                    .context("Failed to get trains")?
+                    .into_iter_by_departure()
+                    .collect::<Vec<_>>();
                 println!("{:#?}", trains);
             }
         },

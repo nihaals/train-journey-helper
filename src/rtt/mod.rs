@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 use crate::{
     config::{Config, RttConfig},
     custom_types::{NumberOfCarriages, TrainService, TrainServiceStation},
-    provider::TrainProvider,
+    provider::{TrainProvider, TrainServices},
     station::Station,
 };
 
@@ -380,7 +380,7 @@ impl TrainProvider for RttClient {
         from: Station,
         to: Station,
         not_before: Timestamp,
-    ) -> Result<Vec<TrainService>> {
+    ) -> Result<TrainServices> {
         let access_token = self.access_token().await?;
         let response = self.location(&access_token, from, to, not_before).await?;
 
@@ -419,7 +419,7 @@ impl TrainProvider for RttClient {
             }
         }
 
-        Ok(trains)
+        Ok(TrainServices::new(trains))
     }
 
     async fn get_service(
