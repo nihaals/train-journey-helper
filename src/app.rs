@@ -17,6 +17,11 @@ use crate::{
 // TODO: Move to config?
 const POLL_SECONDS: u64 = 60;
 const MAX_EARLY_DESTINATION_MINUTES: i64 = 30;
+/// How far before the destination arrival time we start making provider calls.
+const MONITORING_LOOKAHEAD_SECONDS: i64 = 12 * 60 * 60;
+/// How often the cached monitoring start is recomputed while waiting until we are close to the
+/// journey.
+const MONITORING_START_CACHE_TTL_SECONDS: i64 = 30 * 60;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JourneyState {
@@ -68,12 +73,23 @@ pub struct TrainResponse {
     pub from_platform: Option<String>,
 }
 
+#[derive(Clone, Copy)]
+struct CachedMonitoringStart {
+    /// The time to start monitoring.
+    start: Timestamp,
+    /// The target destination arrival time for which this cached value was computed.
+    target_arrival: Timestamp,
+    /// When this cached value was computed.
+    computed_at: Timestamp,
+}
+
 pub struct App<P, N> {
     pub config: Config,
     http: reqwest::Client,
     provider: P,
     notifier: JourneyNotifier<N>,
     state: Arc<Mutex<JourneyState>>,
+    monitoring_start_cache: Mutex<Option<CachedMonitoringStart>>,
 }
 
 impl<P: TrainProvider, N: Notifier> App<P, N> {
@@ -84,6 +100,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             http: client,
             config,
             state: Arc::new(Mutex::new(JourneyState::Waiting)),
+            monitoring_start_cache: Mutex::new(None),
         }
     }
 
@@ -196,17 +213,54 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
 
     async fn should_poll(&self, now: Timestamp, state: &JourneyState) -> Result<bool> {
         Ok(match state {
-            JourneyState::Waiting => now >= self.monitoring_start_time(now).await?,
+            JourneyState::Waiting => {
+                if !self.within_monitoring_lookahead(now)? {
+                    false
+                } else {
+                    now >= self.monitoring_start_time(now).await?
+                }
+            }
             // Checking if we should roll over is handled elsewhere
             JourneyState::WaitingForNextJourney { .. } => false,
             _ => true,
         })
     }
 
-    async fn monitoring_start_time(&self, now: Timestamp) -> Result<Timestamp> {
-        // TODO: We shouldn't be doing RTT API calls every minute while in `JourneyState::Waiting`,
-        // cache or something
+    /// Checks if we are within a generous window of the target arrival time without making
+    /// any provider calls.
+    fn within_monitoring_lookahead(&self, now: Timestamp) -> Result<bool> {
         let target = self.destination_arrival_timestamp(now)?;
+        let until_arrival = now.duration_until(target);
+        Ok(until_arrival.as_secs() <= MONITORING_LOOKAHEAD_SECONDS)
+    }
+
+    async fn monitoring_start_time(&self, now: Timestamp) -> Result<Timestamp> {
+        let target = self.destination_arrival_timestamp(now)?;
+        {
+            let cache = self.monitoring_start_cache.lock().await;
+            if let Some(cached) = cache.as_ref()
+                && cached.target_arrival == target
+            {
+                let age = cached.computed_at.duration_until(now);
+                if age.as_secs() < MONITORING_START_CACHE_TTL_SECONDS {
+                    return Ok(cached.start);
+                }
+            }
+        }
+        let start = self.compute_monitoring_start_time(now, target).await?;
+        *self.monitoring_start_cache.lock().await = Some(CachedMonitoringStart {
+            target_arrival: target,
+            start,
+            computed_at: now,
+        });
+        Ok(start)
+    }
+
+    async fn compute_monitoring_start_time(
+        &self,
+        now: Timestamp,
+        target: Timestamp,
+    ) -> Result<Timestamp> {
         let latest_destination_train =
             target.checked_sub(self.config.walk.station_5_to_final_destination)?;
         let second = self
@@ -468,4 +522,247 @@ fn next_weekday(mut date: Date, weekday: jiff::civil::Weekday) -> Date {
         date = date.tomorrow().expect("next day should be in range");
     }
     date
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        str::FromStr,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    use jiff::{Span, Timestamp};
+
+    use super::*;
+    use crate::{
+        config::Config,
+        custom_types::{NumberOfCarriages, TrainServiceStation},
+    };
+
+    struct MockProvider {
+        calls: Arc<AtomicUsize>,
+    }
+
+    struct MockNotifier;
+
+    fn mock_train(
+        service_id: String,
+        from: Station,
+        to: Station,
+        departure: Timestamp,
+        arrival: Timestamp,
+    ) -> TrainService {
+        TrainService {
+            service_id,
+            from: TrainServiceStation {
+                station: from,
+                scheduled_arrival: departure,
+                estimated_arrival: departure,
+                scheduled_departure: departure,
+                estimated_departure: departure,
+                platform: None,
+            },
+            to: TrainServiceStation {
+                station: to,
+                scheduled_arrival: arrival,
+                estimated_arrival: arrival,
+                scheduled_departure: arrival,
+                estimated_departure: arrival,
+                platform: None,
+            },
+            company: "Test".to_owned(),
+            route_destination: "Test".to_owned(),
+            number_of_carriages: NumberOfCarriages::SameThroughout(2),
+        }
+    }
+
+    impl TrainProvider for MockProvider {
+        fn new(_config: &Config, _client: reqwest::Client) -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+            }
+        }
+
+        async fn departures_between(
+            &self,
+            from: Station,
+            to: Station,
+            not_before: Timestamp,
+        ) -> Result<Vec<TrainService>> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let date = not_before.to_london_zoned().date();
+            let mut trains = Vec::new();
+            for hour in [5, 6, 7, 8, 9, 10] {
+                let departure = date
+                    .to_datetime(jiff::civil::Time::new(hour, 0, 0, 0).unwrap())
+                    .to_london_zoned()
+                    .unwrap()
+                    .timestamp();
+                if departure < not_before {
+                    continue;
+                }
+                let arrival = departure.checked_add(Span::new().minutes(20)).unwrap();
+                trains.push(mock_train(
+                    format!("svc-{hour}"),
+                    from,
+                    to,
+                    departure,
+                    arrival,
+                ));
+            }
+            Ok(trains)
+        }
+
+        async fn get_service(
+            &self,
+            _service_id: &str,
+            _from: Station,
+            _to: Station,
+        ) -> Result<TrainService> {
+            unimplemented!()
+        }
+
+        async fn purge_cache(&self) {}
+    }
+
+    impl Notifier for MockNotifier {
+        fn new(_config: &Config, _client: reqwest::Client) -> Self {
+            Self
+        }
+
+        async fn send_notification(
+            &self,
+            _title: &str,
+            _message: &str,
+            _tag: &str,
+            _group: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+
+        async fn clear_notification(&self, _tag: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    fn test_config() -> Config {
+        Config {
+            stations: crate::config::Stations {
+                home: Station::from_str("AAA").unwrap(),
+                line_one_interchange_primary: Station::from_str("BBB").unwrap(),
+                line_one_interchange_return_preferred: Station::from_str("CCC").unwrap(),
+                destination_line_interchange: Station::from_str("DDD").unwrap(),
+                destination: Station::from_str("EEE").unwrap(),
+            },
+            walk: crate::config::WalkTimes {
+                home_to_station_1: Span::new().minutes(10),
+                station_2_to_4: Span::new().minutes(12),
+                station_4_to_3: Span::new().minutes(8),
+                station_5_to_final_destination: Span::new().minutes(15),
+            },
+            destination_arrival_time: jiff::civil::Time::new(9, 30, 0, 0).unwrap(),
+            destination_stay_estimate: Span::new().minutes(120),
+            travel_day: jiff::civil::Weekday::Monday,
+            listen_addr: "127.0.0.1:3000".parse().unwrap(),
+            healthcheck_url: None,
+            home_assistant: crate::config::HomeAssistantConfig {
+                base_url: "https://example.com".to_owned(),
+                token: "token".to_owned(),
+                notify_service: "notify.mobile_app".to_owned(),
+            },
+            rtt: crate::config::RttConfig {
+                token: "token".to_owned(),
+            },
+        }
+    }
+
+    fn test_app() -> (App<MockProvider, MockNotifier>, Arc<AtomicUsize>) {
+        let config = test_config();
+        let client = reqwest::Client::new();
+        let app = App::<MockProvider, MockNotifier>::new(config, client);
+        let calls = Arc::clone(&app.provider.calls);
+        (app, calls)
+    }
+
+    fn call_count(calls: &Arc<AtomicUsize>) -> usize {
+        calls.load(Ordering::SeqCst)
+    }
+
+    fn london_timestamp(year: i16, month: i8, day: i8, hour: i8, minute: i8) -> Timestamp {
+        crate::timezone::init().unwrap();
+        let date = jiff::civil::Date::new(year, month, day).unwrap();
+        let time = jiff::civil::Time::new(hour, minute, 0, 0).unwrap();
+        date.to_datetime(time)
+            .to_london_zoned()
+            .unwrap()
+            .timestamp()
+    }
+
+    const SHOULD_POLL_PROVIDER_CALL_COUNT: usize = 2;
+
+    #[tokio::test]
+    async fn far_from_journey_skips_provider_calls() {
+        // Friday 09:30, three days before Monday 09:30 arrival
+        let now = london_timestamp(2000, 1, 7, 9, 30);
+        let (app, calls) = test_app();
+        let should_poll = app.should_poll(now, &JourneyState::Waiting).await.unwrap();
+        assert!(!should_poll);
+        assert_eq!(call_count(&calls), 0);
+    }
+
+    #[tokio::test]
+    async fn monitoring_start_is_cached() {
+        // Monday 06:00, within the lookahead of the 09:30 arrival
+        let now = london_timestamp(2000, 1, 3, 6, 0);
+        let (app, calls) = test_app();
+
+        let first = app.monitoring_start_time(now).await.unwrap();
+        assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT);
+        let second = app.monitoring_start_time(now).await.unwrap();
+        assert_eq!(first, second);
+        assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT);
+
+        {
+            let soon = now.checked_add(Span::new().minutes(10)).unwrap();
+            let cached = app.monitoring_start_time(soon).await.unwrap();
+            assert_eq!(cached, first);
+            assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT);
+        }
+
+        {
+            let soon = now.checked_add(Span::new().hours(1)).unwrap();
+            let not_cached = app.monitoring_start_time(soon).await.unwrap();
+            assert_eq!(not_cached, first);
+            assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT * 2);
+        }
+    }
+
+    #[tokio::test]
+    async fn should_poll_uses_cache_before_start() {
+        let now = london_timestamp(2000, 1, 3, 6, 0);
+        let (app, calls) = test_app();
+
+        let start = app.monitoring_start_time(now).await.unwrap();
+        assert!(start > now);
+        assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT);
+
+        let should_poll = app.should_poll(now, &JourneyState::Waiting).await.unwrap();
+        assert!(!should_poll);
+        assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT);
+    }
+
+    #[tokio::test]
+    async fn should_poll_starts_after_cached_start() {
+        let now = london_timestamp(2000, 1, 3, 6, 0);
+        let (app, calls) = test_app();
+
+        let start = app.monitoring_start_time(now).await.unwrap();
+        let after_start = start.checked_add(Span::new().minutes(5)).unwrap();
+        let should_poll = app
+            .should_poll(after_start, &JourneyState::Waiting)
+            .await
+            .unwrap();
+        assert!(should_poll);
+        assert_eq!(call_count(&calls), SHOULD_POLL_PROVIDER_CALL_COUNT * 2);
+    }
 }
