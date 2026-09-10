@@ -140,8 +140,13 @@ async fn set_at_destination(State(app): AppStateState) -> StatusCode {
 }
 
 async fn set_complete(State(app): AppStateState) -> StatusCode {
-    app.set_state(JourneyState::Complete).await;
-    StatusCode::NO_CONTENT
+    match app.complete_journey().await {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(error) => {
+            tracing::error!(?error, "failed to complete journey");
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
 }
 
 async fn resend_notification(State(app): AppStateState) -> StatusCode {

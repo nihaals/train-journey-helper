@@ -33,8 +33,6 @@ pub enum JourneyState {
     OnTrainDestinationToInterchange { selected: TrainService },
     OnTrainReturnPreferredInterchangeToHome { selected: TrainService },
     OnTrainPrimaryInterchangeToHome { selected: TrainService },
-    // TODO: Replace with `WaitingForNextJourney`?
-    Complete,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -108,6 +106,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         *self.state.lock().await = state;
     }
 
+    pub async fn complete_journey(&self) -> Result<()> {
+        let resume_at = self.next_journey_start(Timestamp::now())?;
+        self.set_state(JourneyState::WaitingForNextJourney { resume_at })
+            .await;
+        Ok(())
+    }
+
     pub async fn set_on_train(&self, leg: JourneyLeg, service_id: &str) -> Result<()> {
         let (from, to) = self.leg_stations(leg);
         let selected = self.provider.get_service(service_id, from, to).await?;
@@ -178,19 +183,12 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
 
             let now = Timestamp::now();
             let mut state = self.state.lock().await.clone();
-            match state {
-                JourneyState::Complete => {
-                    state = JourneyState::WaitingForNextJourney {
-                        resume_at: self.next_journey_start(now)?,
-                    };
-                    self.set_state(state.clone()).await;
-                }
-                JourneyState::WaitingForNextJourney { resume_at } if now >= resume_at => {
-                    state = JourneyState::Waiting;
-                    self.set_state(state.clone()).await;
-                    initial_report_sent = false;
-                }
-                _ => {}
+            if let JourneyState::WaitingForNextJourney { resume_at } = state
+                && now >= resume_at
+            {
+                state = JourneyState::Waiting;
+                self.set_state(state.clone()).await;
+                initial_report_sent = false;
             }
 
             if self.should_poll(now, &state).await? {
@@ -382,7 +380,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                     .send_selected_train_update("On final return leg", selected)
                     .await
             }
-            JourneyState::WaitingForNextJourney { .. } | JourneyState::Complete => Ok(()),
+            JourneyState::WaitingForNextJourney { .. } => Ok(()),
         }
     }
 
