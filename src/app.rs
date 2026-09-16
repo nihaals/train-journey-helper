@@ -338,6 +338,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 let second = self
                     .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                     .await?;
+                // TODO: Include estimated arrival on current service
                 self.notifier
                     .send_leg_update("Next outbound leg", &second)
                     .await
