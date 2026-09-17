@@ -99,31 +99,8 @@ impl<N: Notifier> JourneyNotifier<N> {
         return_first: &TrainServices,
         return_second: &TrainServices,
     ) -> Result<()> {
-        let mut message = String::from("Outbound today:\n");
-        append_services(&mut message, "First leg", outbound_first)?;
-        append_services(&mut message, "Second leg", outbound_second)?;
-        message.push_str("\nReturn check: ");
-        if return_first.is_empty() || return_second.is_empty() {
-            message.push_str("no complete train route found around estimated leave time.\n");
-        } else {
-            message.push_str(&format!(
-                "trains seen around {}-{} for the way home.\n",
-                format_time(
-                    return_first
-                        .first_by_departure()
-                        .expect("checked non-empty")
-                        .from
-                        .estimated_departure
-                )?,
-                format_time(
-                    return_second
-                        .last_by_departure()
-                        .expect("checked non-empty")
-                        .to
-                        .estimated_arrival
-                )?,
-            ));
-        }
+        let message =
+            format_status_report(outbound_first, outbound_second, return_first, return_second)?;
         self.send_if_changed(&message).await
     }
 
@@ -194,6 +171,40 @@ impl<N: Notifier> JourneyNotifier<N> {
         *last = Some(message.to_owned());
         Ok(())
     }
+}
+
+pub fn format_status_report(
+    outbound_first: &TrainServices,
+    outbound_second: &TrainServices,
+    return_first: &TrainServices,
+    return_second: &TrainServices,
+) -> Result<String> {
+    let mut message = String::from("Outbound today:\n");
+    append_services(&mut message, "First leg", outbound_first)?;
+    append_services(&mut message, "Second leg", outbound_second)?;
+    message.push_str("\nReturn check: ");
+    if return_first.is_empty() || return_second.is_empty() {
+        message.push_str("no complete train route found around estimated leave time.\n");
+    } else {
+        message.push_str(&format!(
+            "trains seen around {}-{} for the way home.\n",
+            format_time(
+                return_first
+                    .first_by_departure()
+                    .expect("checked non-empty")
+                    .from
+                    .estimated_departure
+            )?,
+            format_time(
+                return_second
+                    .last_by_departure()
+                    .expect("checked non-empty")
+                    .to
+                    .estimated_arrival
+            )?,
+        ));
+    }
+    Ok(message)
 }
 
 fn append_services(message: &mut String, heading: &str, services: &TrainServices) -> Result<()> {

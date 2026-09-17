@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use crate::{
     config::Config,
     custom_types::TrainService,
-    notifier::{JourneyNotifier, Notifier},
+    notifier::{JourneyNotifier, Notifier, format_status_report},
     provider::{TrainProvider, TrainServices},
     station::Station,
     timezone::{DateTimeExt, TimestampExt},
@@ -291,6 +291,29 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .estimated_departure
             .checked_sub(self.config.walk.home_to_station_1)
             .context("Failed to calculate monitoring start")
+    }
+
+    /// Builds the same text as the initial status report notification.
+    pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
+        // TODO: DRY
+        let outbound_first = self
+            .trains_for_leg(
+                JourneyLeg::HomeToPrimaryInterchange,
+                now.checked_add(self.config.walk.home_to_station_1)?,
+            )
+            .await?;
+        let outbound_second = self.best_second_leg_options(&outbound_first, now).await?;
+        let return_start = self.return_start_time(now)?;
+        let return_first = self
+            .trains_for_leg(JourneyLeg::DestinationToInterchange, return_start)
+            .await?;
+        let return_second = self.best_return_second_leg_options(&return_first).await?;
+        format_status_report(
+            &outbound_first,
+            &outbound_second,
+            &return_first,
+            &return_second,
+        )
     }
 
     async fn send_initial_report(&self, now: Timestamp) -> Result<()> {

@@ -112,6 +112,17 @@ enum DebugCommands {
         #[arg(short = 't', long)]
         not_before: Option<DateTime>,
     },
+
+    /// Generate initial status report
+    StatusReport {
+        /// Path to the JSON configuration file
+        #[arg(short, long, default_value = "config.json")]
+        config: PathBuf,
+
+        /// Proxy to use (disables certificate verification), e.g. `http://localhost:8080`
+        #[arg(long)]
+        proxy: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -171,6 +182,23 @@ async fn main() -> Result<()> {
                     .into_iter_by_departure()
                     .collect::<Vec<_>>();
                 println!("{:#?}", trains);
+            }
+            DebugCommands::StatusReport { config, proxy } => {
+                let config = Config::from_json(&config)?;
+                let client = if let Some(proxy) = proxy {
+                    reqwest::Client::builder()
+                        .proxy(reqwest::Proxy::all(proxy)?)
+                        .danger_accept_invalid_certs(true)
+                        .build()?
+                } else {
+                    reqwest::Client::new()
+                };
+                let app = App::<RttClient, HomeAssistantNotifier>::new(config, client);
+                let report = app
+                    .debug_status_report(Timestamp::now())
+                    .await
+                    .context("Failed to get status report")?;
+                println!("{report}");
             }
         },
         Commands::Config { config } => {
