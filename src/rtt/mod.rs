@@ -410,6 +410,12 @@ impl TrainProvider for RttClient {
                 "RTT service mode type is not TRAIN"
             );
 
+            if service.temporal_data.arrival.is_cancelled
+                || service.temporal_data.departure.is_cancelled
+            {
+                continue;
+            }
+
             let departure_data = &service.temporal_data.departure;
             let Some(departure) = departure_data
                 .realtime_forecast
