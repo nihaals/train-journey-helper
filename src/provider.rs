@@ -58,6 +58,12 @@ impl TrainServices {
         self.by_arrival.is_empty()
     }
 
+    /// This should only be used in tests and tracing.
+    pub fn len(&self) -> usize {
+        assert_eq!(self.by_arrival.len(), self.by_departure.len());
+        self.by_arrival.len()
+    }
+
     pub fn push(&mut self, service: TrainService) {
         self.by_arrival.push(service.clone());
         self.by_departure.push(service);

@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use jiff::{Timestamp, civil::Date};
 use serde::Serialize;
 use tokio::sync::Mutex;
+use tracing::info;
 
 use crate::{
     config::Config,
@@ -150,13 +151,20 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         }
     }
 
+    #[tracing::instrument(skip(self), fields(?leg, %not_before))]
     pub async fn trains_for_leg(
         &self,
         leg: JourneyLeg,
         not_before: Timestamp,
     ) -> Result<TrainServices> {
         let (from, to) = self.leg_stations(leg);
-        self.provider.departures_between(from, to, not_before).await
+        info!(?leg, %from, %to, %not_before, "fetching trains for leg");
+        let services = self
+            .provider
+            .departures_between(from, to, not_before)
+            .await?;
+        info!(?leg, %from, %to, count = services.len(), "fetched trains for leg");
+        Ok(services)
     }
 
     pub async fn send_last_notification(&self) -> Result<bool> {
@@ -294,20 +302,39 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     /// Builds the same text as the initial status report notification.
+    #[tracing::instrument(skip(self), fields(%now))]
     pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
         // TODO: DRY
+        info!(%now, "building debug status report");
         let outbound_first = self
             .trains_for_leg(
                 JourneyLeg::HomeToPrimaryInterchange,
                 now.checked_add(self.config.walk.home_to_station_1)?,
             )
             .await?;
+        info!(
+            outbound_first = outbound_first.len(),
+            "fetched outbound first leg",
+        );
         let outbound_second = self.best_second_leg_options(&outbound_first, now).await?;
+        info!(
+            outbound_second = outbound_second.len(),
+            "fetched outbound second leg",
+        );
         let return_start = self.return_start_time(now)?;
+        info!(%return_start, "fetching return legs");
         let return_first = self
             .trains_for_leg(JourneyLeg::DestinationToInterchange, return_start)
             .await?;
+        info!(
+            return_first = return_first.len(),
+            "fetched return first leg",
+        );
         let return_second = self.best_return_second_leg_options(&return_first).await?;
+        info!(
+            return_second = return_second.len(),
+            "fetched return second leg",
+        );
         format_status_report(
             &outbound_first,
             &outbound_second,
@@ -408,6 +435,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         }
     }
 
+    #[tracing::instrument(skip(self, first_legs), fields(first_leg_count = first_legs.len(), %now))]
     async fn best_second_leg_options(
         &self,
         first_legs: &TrainServices,
@@ -415,11 +443,13 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     ) -> Result<TrainServices> {
         let mut second = TrainServices::new_empty();
         let target = self.destination_arrival_timestamp(now)?;
-        for first in first_legs.first_n_by_arrival(3) {
+        info!(%target, first_leg_count = first_legs.len(), "fetching best second-leg options");
+        for (index, first) in first_legs.first_n_by_arrival(3).iter().enumerate() {
             let start = first
                 .to
                 .estimated_arrival
                 .checked_add(self.config.walk.station_2_to_4)?;
+            info!(index, service_id = %first.service_id, %start, "fetching second-leg option");
             for train in self
                 .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                 .await?
@@ -437,15 +467,21 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             }
         }
         second.dedup_by_service_id(&self.config.stations);
+        info!(count = second.len(), "selected best second-leg options");
         Ok(second)
     }
 
+    #[tracing::instrument(skip(self, first_legs), fields(first_leg_count = first_legs.len()))]
     async fn best_return_second_leg_options(
         &self,
         first_legs: &TrainServices,
     ) -> Result<TrainServices> {
         let mut second = TrainServices::new_empty();
-        for first in first_legs.first_n_by_arrival(3) {
+        info!(
+            first_leg_count = first_legs.len(),
+            "fetching best return second-leg options",
+        );
+        for (index, first) in first_legs.first_n_by_arrival(3).iter().enumerate() {
             let start_3 = first
                 .to
                 .estimated_arrival
@@ -454,6 +490,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 .to
                 .estimated_arrival
                 .checked_add(self.config.walk.station_2_to_4)?;
+            info!(index, service_id = %first.service_id, %start_3, %start_2, "fetching return second-leg options");
             second.extend(
                 self.trains_for_leg(JourneyLeg::ReturnPreferredInterchangeToHome, start_3)
                     .await?,
@@ -464,6 +501,10 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             );
         }
         second.dedup_by_service_id(&self.config.stations);
+        info!(
+            count = second.len(),
+            "selected best return second-leg options",
+        );
         Ok(second)
     }
 

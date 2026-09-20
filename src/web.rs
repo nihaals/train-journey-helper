@@ -5,6 +5,7 @@ use axum::{Router, extract::State, http::StatusCode, routing::MethodRouter};
 use jiff::{Timestamp, civil::DateTime};
 use serde::Deserialize;
 use tokio::net::TcpListener;
+use tracing::error;
 
 use crate::{
     app::{self, App, JourneyState},
@@ -105,8 +106,7 @@ fn get_leg_options(leg: app::JourneyLeg) -> MethodRouter<AppState> {
         move |State(app): AppStateState, axum::Json(request): axum::Json<TimeRequest>| async move {
             let time = request_time(&request).map_err(|_| StatusCode::BAD_REQUEST)?;
             let options = app.trains_for_leg(leg, time).await.map_err(|error| {
-                // TODO: Casing?
-                tracing::error!(?error, "failed to get leg options");
+                error!(?error, "failed to get leg options");
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
             Ok::<_, StatusCode>(axum::Json(
@@ -126,7 +126,7 @@ fn set_on_train(leg: app::JourneyLeg) -> MethodRouter<AppState> {
             match app.set_on_train(leg, &request.service_id).await {
                 Ok(()) => StatusCode::NO_CONTENT,
                 Err(error) => {
-                    tracing::error!(?error, "failed to set selected train");
+                    error!(?error, "failed to set selected train");
                     StatusCode::INTERNAL_SERVER_ERROR
                 }
             }
@@ -143,7 +143,7 @@ async fn set_complete(State(app): AppStateState) -> StatusCode {
     match app.complete_journey().await {
         Ok(()) => StatusCode::NO_CONTENT,
         Err(error) => {
-            tracing::error!(?error, "failed to complete journey");
+            error!(?error, "failed to complete journey");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
@@ -154,7 +154,7 @@ async fn resend_notification(State(app): AppStateState) -> StatusCode {
         Ok(true) => StatusCode::NO_CONTENT,
         Ok(false) => StatusCode::NOT_FOUND,
         Err(error) => {
-            tracing::error!(?error, "failed to resend notification");
+            error!(?error, "failed to resend notification");
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }

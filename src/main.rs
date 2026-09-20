@@ -21,6 +21,7 @@ use anyhow::{Context, Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 use jiff::{Timestamp, civil::DateTime};
 use tokio::task::JoinSet;
+use tracing::info;
 
 use crate::{
     app::App, config::Config, home_assistant::HomeAssistantNotifier, notifier::Notifier,
@@ -127,6 +128,7 @@ enum DebugCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    init_tracing();
     let cli = Cli::parse();
     timezone::init()?;
 
@@ -175,6 +177,7 @@ async fn main() -> Result<()> {
                 } else {
                     Timestamp::now()
                 };
+                info!(%from, %to, %not_before, "debug get trains");
                 let trains = provider
                     .departures_between(from, to, not_before)
                     .await
@@ -194,8 +197,10 @@ async fn main() -> Result<()> {
                     reqwest::Client::new()
                 };
                 let app = App::<RttClient, HomeAssistantNotifier>::new(config, client);
+                let now = Timestamp::now();
+                info!(%now, "debug status report");
                 let report = app
-                    .debug_status_report(Timestamp::now())
+                    .debug_status_report(now)
                     .await
                     .context("Failed to get status report")?;
                 println!("{report}");
@@ -213,18 +218,21 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn run(config_path: &Path) -> Result<()> {
+fn init_tracing() {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
         .init();
+}
 
+async fn run(config_path: &Path) -> Result<()> {
     let config = Config::from_json(config_path)?;
     let client = reqwest::Client::new();
     let app = Arc::new(App::<RttClient, HomeAssistantNotifier>::new(config, client));
     app.send_healthcheck().await?;
 
     let listener = tokio::net::TcpListener::bind(app.config.listen_addr).await?;
-    tracing::info!(addr = %app.config.listen_addr, "listening");
+    info!(addr = %app.config.listen_addr, "listening");
 
     let mut join_set = JoinSet::new();
     join_set.spawn({

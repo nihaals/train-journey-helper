@@ -6,6 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use jiff::{Span, Timestamp};
 use serde::Deserialize;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
 use crate::{
     config::{Config, RttConfig},
@@ -64,6 +65,7 @@ struct LocationCacheKey {
 }
 
 impl RttClient {
+    #[tracing::instrument(skip(self))]
     async fn get_access_token(&self) -> Result<String> {
         let response: api_types::get_access_token::Root = self
             .http
@@ -77,6 +79,7 @@ impl RttClient {
             .json()
             .await
             .context("Failed to deserialize RTT auth response")?;
+        debug!("received new RTT access token");
         Ok(response.token)
     }
 
@@ -422,12 +425,14 @@ impl TrainProvider for RttClient {
         Ok(TrainServices::new(trains))
     }
 
+    #[tracing::instrument(skip(self), fields(service_id = %service_id, %from, %to))]
     async fn get_service(
         &self,
         service_id: &str,
         from: Station,
         to: Station,
     ) -> Result<TrainService> {
+        info!(service_id, %from, %to, "fetching single RTT service");
         let access_token = self.access_token().await?;
         let service = self.service(&access_token, service_id).await?;
         train_service_from_rtt(&service.service, from, to)?
