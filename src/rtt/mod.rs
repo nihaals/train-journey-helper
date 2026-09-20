@@ -318,22 +318,30 @@ fn number_of_carriages_for_journey(
             Err(error) => Some(Err(error)),
         })
         .collect::<Result<Vec<_>>>()?;
+    if locations
+        .iter()
+        .any(|location| location.location_metadata.number_of_vehicles.is_none())
+    {
+        return Ok(NumberOfCarriages::Unknown);
+    }
+
     let at_from = locations
         .first()
         .expect("from should not be cancelled")
         .location_metadata
-        .number_of_vehicles;
+        .number_of_vehicles
+        .unwrap();
 
     if locations
         .iter()
-        .all(|location| location.location_metadata.number_of_vehicles == at_from)
+        .all(|location| location.location_metadata.number_of_vehicles.unwrap() == at_from)
     {
         return Ok(NumberOfCarriages::SameThroughout(at_from));
     }
 
     let minimum = locations
         .iter()
-        .map(|location| location.location_metadata.number_of_vehicles)
+        .map(|location| location.location_metadata.number_of_vehicles.unwrap())
         .min()
         .context("RTT service did not include any locations between journey stops")?;
 
@@ -466,7 +474,7 @@ mod tests {
 
     fn service_location(
         code: &str,
-        number_of_vehicles: u8,
+        number_of_vehicles: Option<u8>,
         is_cancelled: bool,
     ) -> api_types::service::ServiceLocation {
         api_types::service::ServiceLocation {
@@ -505,7 +513,7 @@ mod tests {
         }
     }
 
-    fn service_with_carriages(stops: &[(&str, u8)]) -> api_types::service::Service {
+    fn service_with_carriages(stops: &[(&str, Option<u8>)]) -> api_types::service::Service {
         service_with_locations(
             stops
                 .iter()
@@ -518,7 +526,12 @@ mod tests {
 
     #[test]
     fn number_of_carriages_uses_minimum_from_from_until_before_to() {
-        let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 12), ("DDD", 2)]);
+        let service = service_with_carriages(&[
+            ("AAA", Some(8)),
+            ("BBB", Some(4)),
+            ("CCC", Some(12)),
+            ("DDD", Some(2)),
+        ]);
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
         assert_eq!(
@@ -532,7 +545,8 @@ mod tests {
 
     #[test]
     fn number_of_carriages_includes_drop_at_from() {
-        let service = service_with_carriages(&[("AAA", 8), ("BBB", 4), ("CCC", 8)]);
+        let service =
+            service_with_carriages(&[("AAA", Some(8)), ("BBB", Some(4)), ("CCC", Some(8))]);
         let carriages =
             number_of_carriages_for_journey(&service, station("BBB"), station("CCC")).unwrap();
         assert_eq!(carriages, NumberOfCarriages::SameThroughout(4));
@@ -540,7 +554,8 @@ mod tests {
 
     #[test]
     fn number_of_carriages_excludes_drop_at_to() {
-        let service = service_with_carriages(&[("AAA", 8), ("BBB", 8), ("CCC", 4)]);
+        let service =
+            service_with_carriages(&[("AAA", Some(8)), ("BBB", Some(8)), ("CCC", Some(4))]);
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("CCC")).unwrap();
         assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
@@ -549,10 +564,10 @@ mod tests {
     #[test]
     fn number_of_carriages_ignores_cancelled_intermediate_stops() {
         let service = service_with_locations(vec![
-            service_location("AAA", 8, false),
-            service_location("BBB", 4, true),
-            service_location("CCC", 8, false),
-            service_location("DDD", 8, false),
+            service_location("AAA", Some(8), false),
+            service_location("BBB", Some(4), true),
+            service_location("CCC", Some(8), false),
+            service_location("DDD", Some(8), false),
         ]);
         let carriages =
             number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
@@ -560,10 +575,44 @@ mod tests {
     }
 
     #[test]
+    fn number_of_carriages_is_unknown_when_any_stop_is_unknown() {
+        let service = service_with_carriages(&[
+            ("AAA", Some(8)),
+            ("BBB", None),
+            ("CCC", Some(8)),
+            ("DDD", Some(8)),
+        ]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("AAA"), station("DDD")).unwrap();
+        assert_eq!(carriages, NumberOfCarriages::Unknown);
+    }
+
+    #[test]
+    fn number_of_carriages_ignores_unknown_before_from() {
+        let service = service_with_carriages(&[
+            ("AAA", None),
+            ("BBB", Some(8)),
+            ("CCC", Some(8)),
+            ("DDD", Some(8)),
+        ]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("BBB"), station("DDD")).unwrap();
+        assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
+    }
+
+    #[test]
+    fn number_of_carriages_ignores_unknown_at_to() {
+        let service = service_with_carriages(&[("AAA", Some(8)), ("BBB", Some(8)), ("CCC", None)]);
+        let carriages =
+            number_of_carriages_for_journey(&service, station("AAA"), station("CCC")).unwrap();
+        assert_eq!(carriages, NumberOfCarriages::SameThroughout(8));
+    }
+
+    #[test]
     fn train_service_does_not_exist_when_from_is_cancelled() {
         let service = service_with_locations(vec![
-            service_location("AAA", 8, true),
-            service_location("BBB", 8, false),
+            service_location("AAA", Some(8), true),
+            service_location("BBB", Some(8), false),
         ]);
         let service = train_service_from_rtt(&service, station("AAA"), station("BBB")).unwrap();
         assert!(service.is_none());
@@ -572,8 +621,8 @@ mod tests {
     #[test]
     fn train_service_does_not_exist_when_to_is_cancelled() {
         let service = service_with_locations(vec![
-            service_location("AAA", 8, false),
-            service_location("BBB", 8, true),
+            service_location("AAA", Some(8), false),
+            service_location("BBB", Some(8), true),
         ]);
         let service = train_service_from_rtt(&service, station("AAA"), station("BBB")).unwrap();
         assert!(service.is_none());
@@ -581,7 +630,7 @@ mod tests {
 
     #[test]
     fn cancellation_status_must_match_between_arrival_and_departure() {
-        let mut location = service_location("AAA", 8, false);
+        let mut location = service_location("AAA", Some(8), false);
         location
             .temporal_data
             .arrival

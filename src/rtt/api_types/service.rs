@@ -47,7 +47,7 @@ pub struct IndividualTemporalData {
 #[serde(rename_all = "camelCase")]
 pub struct LocationMetadata {
     pub platform: Option<Platform>,
-    pub number_of_vehicles: u8,
+    pub number_of_vehicles: Option<u8>,
 }
 
 #[derive(Deserialize)]

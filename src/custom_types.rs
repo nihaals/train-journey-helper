@@ -16,6 +16,7 @@ pub struct TrainServiceStation {
 pub enum NumberOfCarriages {
     SameThroughout(u8),
     Varies { minimum: u8, at_from: u8 },
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
