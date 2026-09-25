@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use jiff::{Span, Timestamp};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{debug, info};
+use tracing::{debug, debug_span, info, warn};
 
 use crate::{
     config::{Config, RttConfig},
@@ -49,6 +49,72 @@ fn access_token_needs_refresh(token: &str) -> Result<bool> {
     Ok(payload.expiry()? <= cutoff)
 }
 
+/// RTT returns `X-RateLimit-Limit-<Minute|Hour|Day|Week>`,
+/// `X-RateLimit-Remaining-<Minute|Hour|Day|Week>`, and `Retry-After` on 429s.
+fn format_rate_limit_headers(headers: &reqwest::header::HeaderMap) -> String {
+    let relevant = headers
+        .iter()
+        .filter(|(name, _)| {
+            let name = name.as_str();
+            name.starts_with("x-ratelimit-") || name == "retry-after"
+        })
+        .map(|(name, value)| {
+            format!(
+                "{name}: {}",
+                value.to_str().unwrap_or("<non-utf-8 header value>"),
+            )
+        })
+        .collect::<Vec<_>>();
+    if relevant.is_empty() {
+        "<no rate-limit headers>".to_owned()
+    } else {
+        relevant.join(", ")
+    }
+}
+
+/// Extension to send an RTT request, check the response status, and deserialize the JSON body.
+/// `operation` is used for logging and error context, e.g. "RTT service request for
+/// {unique_identity}".
+trait RttRequestBuilder {
+    async fn fetch_rtt_json<T>(self, operation: &str) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned;
+}
+
+impl RttRequestBuilder for reqwest::RequestBuilder {
+    async fn fetch_rtt_json<T>(self, operation: &str) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let response = self
+            .send()
+            .await
+            .with_context(|| format!("Failed to send {operation}"))?;
+        let status = response.status();
+        let url = response.url().clone();
+        let rate_limit_headers = format_rate_limit_headers(response.headers());
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "<failed to read body>".to_owned());
+            warn!(
+                %status,
+                %url,
+                rate_limit_headers,
+                body,
+                "{operation} failed",
+            );
+            bail!("failed {operation}: got {status}");
+        }
+        debug!(%status, %url, rate_limit_headers, "{operation} succeeded");
+        response
+            .json()
+            .await
+            .with_context(|| format!("Failed to deserialize {operation} response"))
+    }
+}
+
 pub struct RttClient {
     http: reqwest::Client,
     config: RttConfig,
@@ -71,30 +137,30 @@ impl RttClient {
             .http
             .get("https://data.rtt.io/api/get_access_token")
             .bearer_auth(&self.config.token)
-            .send()
-            .await
-            .context("Failed to send RTT access token request")?
-            .error_for_status()
-            .context("Failed to get RTT access token")?
-            .json()
-            .await
-            .context("Failed to deserialize RTT auth response")?;
+            .fetch_rtt_json("RTT access token request")
+            .await?;
         debug!("received new RTT access token");
         Ok(response.token)
     }
 
+    #[tracing::instrument(skip(self))]
     async fn access_token(&self) -> Result<String> {
         let mut access_token = self.access_token.lock().await;
-        match access_token.as_deref() {
-            Some(token) if !access_token_needs_refresh(token)? => Ok(token.to_owned()),
-            _ => {
-                let token = self.get_access_token().await?;
-                *access_token = Some(token.clone());
-                Ok(token)
+        if let Some(token) = access_token.as_deref() {
+            if !access_token_needs_refresh(token)? {
+                debug!("reusing cached RTT access token");
+                return Ok(token.to_owned());
             }
+            info!("refreshing expiring RTT access token");
+        } else {
+            info!("fetching initial RTT access token");
         }
+        let token = self.get_access_token().await?;
+        *access_token = Some(token.clone());
+        Ok(token)
     }
 
+    #[tracing::instrument(skip(self, access_token))]
     async fn service(
         &self,
         access_token: &str,
@@ -110,22 +176,18 @@ impl RttClient {
             .get(unique_identity)
             .cloned()
         {
+            debug!("RTT service cache hit");
             return Ok(service);
         }
 
+        info!("fetching RTT service detail");
         let response: Arc<api_types::service::Root> = Arc::new(
             self.http
                 .get("https://data.rtt.io/gb-nr/service")
                 .bearer_auth(access_token)
                 .query(&[("uniqueIdentity", unique_identity)])
-                .send()
-                .await
-                .context("Failed to send RTT service request")?
-                .error_for_status()
-                .context("Failed to get RTT service data")?
-                .json()
-                .await
-                .context("Failed to deserialize RTT service response")?,
+                .fetch_rtt_json(&format!("RTT service request for {unique_identity}"))
+                .await?,
         );
         self.service_cache
             .lock()
@@ -134,6 +196,7 @@ impl RttClient {
         Ok(response)
     }
 
+    #[tracing::instrument(skip(self, access_token))]
     async fn location(
         &self,
         access_token: &str,
@@ -147,9 +210,11 @@ impl RttClient {
             not_before,
         };
         if let Some(location) = self.location_cache.lock().await.get(&key).cloned() {
+            debug!("RTT location cache hit");
             return Ok(location);
         }
 
+        info!("fetching RTT location");
         let response: Arc<api_types::location::Root> = Arc::new(
             self.http
                 .get("https://data.rtt.io/gb-nr/location")
@@ -159,14 +224,14 @@ impl RttClient {
                     ("filterTo", to.as_str()),
                     ("timeFrom", &not_before.to_string()),
                 ])
-                .send()
-                .await
-                .context("Failed to send RTT request")?
-                .error_for_status()
-                .context("Failed to get RTT data")?
-                .json()
-                .await
-                .context("Failed to deserialize RTT response")?,
+                .fetch_rtt_json(&format!(
+                    "RTT location request for {from}->{to} from {not_before}"
+                ))
+                .await?,
+        );
+        info!(
+            service_count = response.services.len(),
+            "received RTT location response with services",
         );
         self.location_cache
             .lock()
@@ -386,6 +451,7 @@ impl TrainProvider for RttClient {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     async fn departures_between(
         &self,
         from: Station,
@@ -395,58 +461,76 @@ impl TrainProvider for RttClient {
         let access_token = self.access_token().await?;
         let response = self.location(&access_token, from, to, not_before).await?;
 
+        let total_candidates = response.services.len();
+        info!(total_candidates, "fetched RTT location candidates");
         let mut trains = Vec::new();
-        for service in &response.services {
-            if service.schedule_metadata.mode_type == "BUS" {
-                continue;
-            }
-
-            ensure!(
-                service.schedule_metadata.in_passenger_service,
-                "RTT service is not in passenger service"
-            );
-            ensure!(
-                service.schedule_metadata.mode_type == "TRAIN",
-                "RTT service mode type is not TRAIN"
-            );
-
-            if service.temporal_data.arrival.is_cancelled
-                || service.temporal_data.departure.is_cancelled
+        for (index, service) in response.services.iter().enumerate() {
+            let unique_identity = &service.schedule_metadata.unique_identity;
             {
-                continue;
-            }
+                let span = debug_span!("considering RTT candidate service", index, unique_identity);
+                let _enter = span.enter();
+                debug!(
+                    mode_type = service.schedule_metadata.mode_type,
+                    "considering RTT candidate service",
+                );
+                if service.schedule_metadata.mode_type == "BUS" {
+                    debug!("skipping BUS service");
+                    continue;
+                }
 
-            let departure_data = &service.temporal_data.departure;
-            let Some(departure) = departure_data
-                .realtime_forecast
-                .or(departure_data.schedule_advertised)
-            else {
-                continue;
-            };
-            if departure < not_before {
-                continue;
-            }
+                ensure!(
+                    service.schedule_metadata.in_passenger_service,
+                    "RTT service is not in passenger service"
+                );
+                ensure!(
+                    service.schedule_metadata.mode_type == "TRAIN",
+                    "RTT service mode type is not TRAIN"
+                );
 
+                if service.temporal_data.arrival.is_cancelled
+                    || service.temporal_data.departure.is_cancelled
+                {
+                    debug!("skipping cancelled service");
+                    continue;
+                }
+
+                let departure_data = &service.temporal_data.departure;
+                let Some(departure) = departure_data
+                    .realtime_forecast
+                    .or(departure_data.schedule_advertised)
+                else {
+                    debug!("skipping service with no departure time");
+                    continue;
+                };
+                if departure < not_before {
+                    debug!(
+                        %departure,
+                        "skipping service departing before not_before",
+                    );
+                    continue;
+                }
+
+                info!("fetching RTT service detail");
+            }
             // TODO: Concurrency
-            let service = self
-                .service(&access_token, &service.schedule_metadata.unique_identity)
-                .await?;
+            let service = self.service(&access_token, unique_identity).await?;
             if let Some(service) = train_service_from_rtt(&service.service, from, to)? {
                 trains.push(service);
             }
         }
 
+        info!(matched = trains.len(), "finished fetching departures");
         Ok(TrainServices::new(trains))
     }
 
-    #[tracing::instrument(skip(self), fields(service_id = %service_id, %from, %to))]
+    #[tracing::instrument(skip(self))]
     async fn get_service(
         &self,
         service_id: &str,
         from: Station,
         to: Station,
     ) -> Result<TrainService> {
-        info!(service_id, %from, %to, "fetching single RTT service");
+        info!("fetching single RTT service");
         let access_token = self.access_token().await?;
         let service = self.service(&access_token, service_id).await?;
         train_service_from_rtt(&service.service, from, to)?
