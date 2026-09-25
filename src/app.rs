@@ -151,7 +151,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         }
     }
 
-    #[tracing::instrument(skip(self), fields(?leg, %not_before))]
+    #[tracing::instrument(skip(self))]
     pub async fn trains_for_leg(
         &self,
         leg: JourneyLeg,
@@ -302,7 +302,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     /// Builds the same text as the initial status report notification.
-    #[tracing::instrument(skip(self), fields(%now))]
+    #[tracing::instrument(skip(self))]
     pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
         // TODO: DRY
         info!(%now, "building debug status report");
@@ -449,7 +449,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 .to
                 .estimated_arrival
                 .checked_add(self.config.walk.station_2_to_4)?;
-            info!(index, service_id = %first.service_id, %start, "fetching second-leg option");
+            info!(index, service_id = first.service_id, %start, "fetching second-leg option");
             for train in self
                 .trains_for_leg(JourneyLeg::InterchangeToDestination, start)
                 .await?
@@ -490,7 +490,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
                 .to
                 .estimated_arrival
                 .checked_add(self.config.walk.station_2_to_4)?;
-            info!(index, service_id = %first.service_id, %start_3, %start_2, "fetching return second-leg options");
+            info!(index, service_id = first.service_id, %start_3, %start_2, "fetching return second-leg options");
             second.extend(
                 self.trains_for_leg(JourneyLeg::ReturnPreferredInterchangeToHome, start_3)
                     .await?,
