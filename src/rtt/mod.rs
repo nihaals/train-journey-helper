@@ -3,10 +3,10 @@ mod api_types;
 use std::{collections::HashMap, sync::Arc};
 
 use anyhow::{Context, Result, bail, ensure};
-use jiff::{Span, Timestamp};
+use jiff::Timestamp;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{Span as TracingSpan, debug, debug_span, info, warn};
+use tracing::{Span, debug, debug_span, info, warn};
 
 use crate::{
     config::{Config, RttConfig},
@@ -45,7 +45,7 @@ impl AccessTokenPayload {
 /// Returns true if the access token will expire within the next minute.
 fn access_token_needs_refresh(token: &str) -> Result<bool> {
     let payload: AccessTokenPayload = parse_jwt_payload(token)?;
-    let cutoff = Timestamp::now().checked_add(Span::new().minutes(1))?;
+    let cutoff = Timestamp::now().checked_add(jiff::Span::new().minutes(1))?;
     Ok(payload.expiry()? <= cutoff)
 }
 
@@ -231,7 +231,7 @@ impl RttClient {
                 ))
                 .await?,
         );
-        TracingSpan::current().record("service_count", response.services.len());
+        Span::current().record("service_count", response.services.len());
         self.location_cache
             .lock()
             .await
@@ -467,7 +467,7 @@ impl TrainProvider for RttClient {
         let response = self.location(&access_token, from, to, not_before).await?;
 
         let total_candidates = response.services.len();
-        let span = TracingSpan::current();
+        let span = Span::current();
         span.record("total_candidates", total_candidates);
         let mut trains = Vec::new();
         for (index, service) in response.services.iter().enumerate() {
