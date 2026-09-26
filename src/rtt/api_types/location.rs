@@ -19,7 +19,7 @@ pub struct Service {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceTemporalData {
-    pub arrival: TemporalData,
+    pub arrival: Option<TemporalData>,
     pub departure: TemporalData,
 }
 

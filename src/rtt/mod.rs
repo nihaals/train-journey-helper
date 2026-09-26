@@ -494,8 +494,12 @@ impl TrainProvider for RttClient {
                     "RTT service mode type is not TRAIN"
                 );
 
-                if service.temporal_data.arrival.is_cancelled
-                    || service.temporal_data.departure.is_cancelled
+                if service.temporal_data.departure.is_cancelled
+                    || service
+                        .temporal_data
+                        .arrival
+                        .as_ref()
+                        .is_some_and(|a| a.is_cancelled)
                 {
                     debug!("skipping cancelled service");
                     continue;
