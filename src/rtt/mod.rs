@@ -6,7 +6,7 @@ use anyhow::{Context, Result, bail, ensure};
 use jiff::{Span, Timestamp};
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use tracing::{debug, debug_span, info, warn};
+use tracing::{Span as TracingSpan, debug, debug_span, info, warn};
 
 use crate::{
     config::{Config, RttConfig},
@@ -103,11 +103,12 @@ impl RttRequestBuilder for reqwest::RequestBuilder {
                 %url,
                 rate_limit_headers,
                 body,
-                "{operation} failed",
+                operation,
+                "RTT request failed",
             );
             bail!("failed {operation}: got {status}");
         }
-        debug!(%status, %url, rate_limit_headers, "{operation} succeeded");
+        debug!(%status, %url, rate_limit_headers, operation, "RTT request succeeded");
         response
             .json()
             .await
@@ -180,7 +181,6 @@ impl RttClient {
             return Ok(service);
         }
 
-        info!("fetching RTT service detail");
         let response: Arc<api_types::service::Root> = Arc::new(
             self.http
                 .get("https://data.rtt.io/gb-nr/service")
@@ -196,7 +196,10 @@ impl RttClient {
         Ok(response)
     }
 
-    #[tracing::instrument(skip(self, access_token))]
+    #[tracing::instrument(
+        skip(self, access_token),
+        fields(service_count = tracing::field::Empty),
+    )]
     async fn location(
         &self,
         access_token: &str,
@@ -214,7 +217,6 @@ impl RttClient {
             return Ok(location);
         }
 
-        info!("fetching RTT location");
         let response: Arc<api_types::location::Root> = Arc::new(
             self.http
                 .get("https://data.rtt.io/gb-nr/location")
@@ -229,10 +231,7 @@ impl RttClient {
                 ))
                 .await?,
         );
-        info!(
-            service_count = response.services.len(),
-            "received RTT location response with services",
-        );
+        TracingSpan::current().record("service_count", response.services.len());
         self.location_cache
             .lock()
             .await
@@ -451,7 +450,13 @@ impl TrainProvider for RttClient {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(
+        skip(self),
+        fields(
+            total_candidates = tracing::field::Empty,
+            matched = tracing::field::Empty,
+        ),
+    )]
     async fn departures_between(
         &self,
         from: Station,
@@ -462,17 +467,19 @@ impl TrainProvider for RttClient {
         let response = self.location(&access_token, from, to, not_before).await?;
 
         let total_candidates = response.services.len();
-        info!(total_candidates, "fetched RTT location candidates");
+        let span = TracingSpan::current();
+        span.record("total_candidates", total_candidates);
         let mut trains = Vec::new();
         for (index, service) in response.services.iter().enumerate() {
             let unique_identity = &service.schedule_metadata.unique_identity;
             {
-                let span = debug_span!("considering RTT candidate service", index, unique_identity);
-                let _enter = span.enter();
-                debug!(
-                    mode_type = service.schedule_metadata.mode_type,
+                let span = debug_span!(
                     "considering RTT candidate service",
+                    index,
+                    unique_identity,
+                    mode_type = service.schedule_metadata.mode_type,
                 );
+                let _enter = span.enter();
                 if service.schedule_metadata.mode_type == "BUS" {
                     debug!("skipping BUS service");
                     continue;
@@ -509,8 +516,6 @@ impl TrainProvider for RttClient {
                     );
                     continue;
                 }
-
-                info!("fetching RTT service detail");
             }
             // TODO: Concurrency
             let service = self.service(&access_token, unique_identity).await?;
@@ -519,7 +524,7 @@ impl TrainProvider for RttClient {
             }
         }
 
-        info!(matched = trains.len(), "finished fetching departures");
+        span.record("matched", trains.len());
         Ok(TrainServices::new(trains))
     }
 
@@ -530,7 +535,6 @@ impl TrainProvider for RttClient {
         from: Station,
         to: Station,
     ) -> Result<TrainService> {
-        info!("fetching single RTT service");
         let access_token = self.access_token().await?;
         let service = self.service(&access_token, service_id).await?;
         train_service_from_rtt(&service.service, from, to)?
