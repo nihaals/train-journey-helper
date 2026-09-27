@@ -20,10 +20,7 @@ type AppStateState = State<AppState>;
 
 pub async fn serve(listener: TcpListener, app: AppState) -> std::io::Result<()> {
     let router = router(app);
-    axum::serve(listener, router)
-        // TODO: Investigate
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    axum::serve(listener, router).await
 }
 
 fn router(app: AppState) -> Router {
@@ -158,8 +155,4 @@ async fn resend_notification(State(app): AppStateState) -> StatusCode {
             StatusCode::INTERNAL_SERVER_ERROR
         }
     }
-}
-
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
 }
