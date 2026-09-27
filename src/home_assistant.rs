@@ -52,6 +52,7 @@ impl Notifier for HomeAssistantNotifier {
         }
     }
 
+    #[tracing::instrument(skip(self, message))]
     async fn send_notification(
         &self,
         title: &str,
@@ -70,6 +71,7 @@ impl Notifier for HomeAssistantNotifier {
         .await
     }
 
+    #[tracing::instrument(skip(self))]
     async fn clear_notification(&self, tag: &str) -> Result<()> {
         self.send(&NotifyRequest {
             title: "",

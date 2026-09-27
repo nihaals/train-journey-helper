@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use jiff::Timestamp;
 use tokio::sync::Mutex;
+use tracing::Span;
 
 use crate::{
     config::Config, custom_types::TrainService, provider::TrainServices, timezone::TimestampExt,
@@ -92,6 +93,7 @@ impl StableHash {
 }
 
 impl<N: Notifier> JourneyNotifier<N> {
+    #[tracing::instrument(skip_all)]
     pub async fn send_status_report(
         &self,
         outbound_first: &TrainServices,
@@ -104,6 +106,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.send_if_changed(&message).await
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn send_outbound_update(
         &self,
         first: &TrainServices,
@@ -115,6 +118,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.send_if_changed(&message).await
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn send_return_update(
         &self,
         first: &TrainServices,
@@ -126,12 +130,14 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.send_if_changed(&message).await
     }
 
+    #[tracing::instrument(skip(self, services))]
     pub async fn send_leg_update(&self, heading: &str, services: &TrainServices) -> Result<()> {
         let mut message = format!("{heading}:\n");
         append_services(&mut message, "Options", services)?;
         self.send_if_changed(&message).await
     }
 
+    #[tracing::instrument(skip(self, service))]
     pub async fn send_selected_train_update(
         &self,
         heading: &str,
@@ -141,6 +147,7 @@ impl<N: Notifier> JourneyNotifier<N> {
         self.send_if_changed(&message).await
     }
 
+    #[tracing::instrument(skip_all)]
     pub async fn resend_last_notification(&self) -> Result<bool> {
         let last = self.last_notification.lock().await;
         if let Some(last) = last.as_ref() {
@@ -162,13 +169,17 @@ impl<N: Notifier> JourneyNotifier<N> {
             .await
     }
 
+    #[tracing::instrument(skip_all, fields(sent = tracing::field::Empty))]
     async fn send_if_changed(&self, message: &str) -> Result<()> {
+        let span = Span::current();
         let mut last = self.last_notification.lock().await;
         if last.as_deref() == Some(message) {
+            span.record("sent", false);
             return Ok(());
         }
         self.send_notification(message).await?;
         *last = Some(message.to_owned());
+        span.record("sent", true);
         Ok(())
     }
 }
