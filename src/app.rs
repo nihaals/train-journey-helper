@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use jiff::{Timestamp, civil::Date};
 use serde::Serialize;
 use tokio::sync::Mutex;
-use tracing::{Span, debug, info};
+use tracing::{Instrument, Span, debug, info, info_span};
 
 use crate::{
     config::Config,
@@ -227,33 +227,43 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     pub async fn run_scheduler(self: Arc<Self>) -> Result<()> {
-        // TODO: Add span?
+        let mut tick: u32 = 0;
         let mut initial_report_sent = false;
         loop {
-            self.provider.purge_cache().await;
-
-            let now = Timestamp::now();
-            let mut state = self.state.lock().await.clone();
-            if let JourneyState::WaitingForNextJourney { resume_at } = state
-                && now >= resume_at
-            {
-                state = JourneyState::Waiting;
-                self.set_state(state.clone()).await;
-                initial_report_sent = false;
-            }
-
-            if self.should_poll(now, &state).await? {
-                if !initial_report_sent {
-                    self.send_initial_report(now).await?;
-                    initial_report_sent = true;
-                } else {
-                    self.notify_for_state(&state, now).await?;
-                }
-            }
-
-            self.send_healthcheck().await?;
+            tick += 1;
+            let span = info_span!("tick_once", tick, state = tracing::field::Empty);
+            self.tick_once(&mut initial_report_sent)
+                .instrument(span)
+                .await?;
             tokio::time::sleep(std::time::Duration::from_secs(POLL_SECONDS)).await;
         }
+    }
+
+    async fn tick_once(&self, initial_report_sent: &mut bool) -> Result<()> {
+        self.provider.purge_cache().await;
+
+        let now = Timestamp::now();
+        let mut state = self.state.lock().await.clone();
+        if let JourneyState::WaitingForNextJourney { resume_at } = state
+            && now >= resume_at
+        {
+            state = JourneyState::Waiting;
+            self.set_state(state.clone()).await;
+            *initial_report_sent = false;
+        }
+        Span::current().record("state", state.name());
+
+        if self.should_poll(now, &state).await? {
+            if !*initial_report_sent {
+                self.send_initial_report(now).await?;
+                *initial_report_sent = true;
+            } else {
+                self.notify_for_state(&state, now).await?;
+            }
+        }
+
+        self.send_healthcheck().await?;
+        Ok(())
     }
 
     async fn should_poll(&self, now: Timestamp, state: &JourneyState) -> Result<bool> {
