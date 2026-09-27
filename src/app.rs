@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use jiff::{Timestamp, civil::Date};
 use serde::Serialize;
 use tokio::sync::Mutex;
-use tracing::{Span, debug};
+use tracing::{Span, debug, info};
 
 use crate::{
     config::Config,
@@ -34,6 +34,32 @@ pub enum JourneyState {
     OnTrainDestinationToInterchange { selected: TrainService },
     OnTrainReturnPreferredInterchangeToHome { selected: TrainService },
     OnTrainPrimaryInterchangeToHome { selected: TrainService },
+}
+
+impl JourneyState {
+    /// This should only be used for tracing.
+    pub fn name(&self) -> &'static str {
+        match self {
+            JourneyState::Waiting => "waiting",
+            JourneyState::WaitingForNextJourney { .. } => "waiting_for_next_journey",
+            JourneyState::OnTrainHomeToPrimaryInterchange { .. } => {
+                "on_train_home_to_primary_interchange"
+            }
+            JourneyState::OnTrainInterchangeToDestination { .. } => {
+                "on_train_interchange_to_destination"
+            }
+            JourneyState::AtDestination => "at_destination",
+            JourneyState::OnTrainDestinationToInterchange { .. } => {
+                "on_train_destination_to_interchange"
+            }
+            JourneyState::OnTrainReturnPreferredInterchangeToHome { .. } => {
+                "on_train_return_preferred_interchange_to_home"
+            }
+            JourneyState::OnTrainPrimaryInterchangeToHome { .. } => {
+                "on_train_primary_interchange_to_home"
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -104,7 +130,15 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     pub async fn set_state(&self, state: JourneyState) {
-        *self.state.lock().await = state;
+        let mut current = self.state.lock().await;
+        if *current != state {
+            info!(
+                from = current.name(),
+                to = state.name(),
+                "journey state transition",
+            );
+            *current = state;
+        }
     }
 
     pub async fn complete_journey(&self) -> Result<()> {
