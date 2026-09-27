@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use axum::{Router, extract::State, http::StatusCode, routing::MethodRouter};
+use axum::{Router, extract::State, http::StatusCode, response::Response, routing::MethodRouter};
 use jiff::{Timestamp, civil::DateTime};
 use serde::Deserialize;
 use tokio::net::TcpListener;
-use tracing::error;
+use tracing::{Instrument, error, info_span};
 
 use crate::{
     app::{self, App, JourneyState},
@@ -24,7 +24,6 @@ pub async fn serve(listener: TcpListener, app: AppState) -> std::io::Result<()> 
 }
 
 fn router(app: AppState) -> Router {
-    // TODO: Add span for each request
     Router::new()
         .route("/config", axum::routing::get(get_config))
         .route(
@@ -77,6 +76,7 @@ fn router(app: AppState) -> Router {
             "/notification/resend",
             axum::routing::post(resend_notification),
         )
+        .layer(axum::middleware::from_fn(trace_requests))
         .with_state(app)
 }
 
@@ -92,6 +92,18 @@ struct ServiceRequest {
 
 fn request_time(request: &TimeRequest) -> Result<Timestamp> {
     Ok(request.time.to_london_zoned()?.timestamp())
+}
+
+async fn trace_requests(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let span = info_span!(
+        "http_request",
+        method = %req.method(),
+        path = req.uri().path(),
+        status = tracing::field::Empty,
+    );
+    let response = next.run(req).instrument(span.clone()).await;
+    span.record("status", response.status().as_u16());
+    response
 }
 
 async fn get_config(State(app): AppStateState) -> axum::Json<app::StationConfigResponse> {
