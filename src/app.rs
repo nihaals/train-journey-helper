@@ -266,6 +266,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         Ok(())
     }
 
+    /// Returns if we are close enough to the journey to start polling for train updates.
     async fn should_poll(&self, now: Timestamp, state: &JourneyState) -> Result<bool> {
         Ok(match state {
             JourneyState::Waiting => {
@@ -281,7 +282,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         })
     }
 
-    /// Checks if we are within a generous window of the target arrival time without making
+    /// Returns if we are within a generous window of the target arrival time without making
     /// any provider calls.
     fn within_monitoring_lookahead(&self, now: Timestamp) -> Result<bool> {
         let target = self.destination_arrival_timestamp(now)?;
@@ -289,6 +290,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         Ok(until_arrival.as_secs() <= MONITORING_LOOKAHEAD_SECONDS)
     }
 
+    /// A cache wrapper around [`Self::compute_monitoring_start_time()`].
     async fn monitoring_start_time(&self, now: Timestamp) -> Result<Timestamp> {
         let target = self.destination_arrival_timestamp(now)?;
         {
@@ -311,6 +313,8 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         Ok(start)
     }
 
+    /// Returns the latest time we can leave home and still make the destination arrival time,
+    /// taking into account the walking times between stations and the train schedules.
     async fn compute_monitoring_start_time(
         &self,
         now: Timestamp,
@@ -354,7 +358,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .context("Failed to calculate monitoring start")
     }
 
-    /// Builds the same text as the initial status report notification.
+    /// Returns the same text as the initial status report notification.
     pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
         let (outbound_first, outbound_second, return_first, return_second) =
             self.initial_report_data(now).await?;
@@ -379,6 +383,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .await
     }
 
+    /// Returns the data used to generate the initial status report notification.
     #[tracing::instrument(
         skip(self),
         fields(
