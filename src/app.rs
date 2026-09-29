@@ -355,6 +355,30 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     /// Builds the same text as the initial status report notification.
+    pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
+        let (outbound_first, outbound_second, return_first, return_second) =
+            self.initial_report_data(now).await?;
+        format_status_report(
+            &outbound_first,
+            &outbound_second,
+            &return_first,
+            &return_second,
+        )
+    }
+
+    async fn send_initial_report(&self, now: Timestamp) -> Result<()> {
+        let (outbound_first, outbound_second, return_first, return_second) =
+            self.initial_report_data(now).await?;
+        self.notifier
+            .send_status_report(
+                &outbound_first,
+                &outbound_second,
+                &return_first,
+                &return_second,
+            )
+            .await
+    }
+
     #[tracing::instrument(
         skip(self),
         fields(
@@ -365,8 +389,10 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             return_second = tracing::field::Empty,
         ),
     )]
-    pub async fn debug_status_report(&self, now: Timestamp) -> Result<String> {
-        // TODO: DRY
+    async fn initial_report_data(
+        &self,
+        now: Timestamp,
+    ) -> Result<(TrainServices, TrainServices, TrainServices, TrainServices)> {
         let span = Span::current();
         let outbound_first = self
             .trains_for_leg(
@@ -385,35 +411,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         span.record("return_first", return_first.len());
         let return_second = self.best_return_second_leg_options(&return_first).await?;
         span.record("return_second", return_second.len());
-        format_status_report(
-            &outbound_first,
-            &outbound_second,
-            &return_first,
-            &return_second,
-        )
-    }
-
-    async fn send_initial_report(&self, now: Timestamp) -> Result<()> {
-        let outbound_first = self
-            .trains_for_leg(
-                JourneyLeg::HomeToPrimaryInterchange,
-                now.checked_add(self.config.walk.home_to_station_1)?,
-            )
-            .await?;
-        let outbound_second = self.best_second_leg_options(&outbound_first, now).await?;
-        let return_start = self.return_start_time(now)?;
-        let return_first = self
-            .trains_for_leg(JourneyLeg::DestinationToInterchange, return_start)
-            .await?;
-        let return_second = self.best_return_second_leg_options(&return_first).await?;
-        self.notifier
-            .send_status_report(
-                &outbound_first,
-                &outbound_second,
-                &return_first,
-                &return_second,
-            )
-            .await
+        Ok((outbound_first, outbound_second, return_first, return_second))
     }
 
     async fn notify_for_state(&self, state: &JourneyState, now: Timestamp) -> Result<()> {
