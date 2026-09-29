@@ -579,7 +579,19 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
     }
 
     fn destination_arrival_timestamp(&self, now: Timestamp) -> Result<Timestamp> {
-        let date = next_weekday(now.to_london_zoned().date(), self.config.travel_day);
+        let now_date = now.to_london_zoned().date();
+        {
+            let date = next_weekday(now_date, self.config.travel_day);
+            let target = date
+                .to_datetime(self.config.destination_arrival_time)
+                .to_london_zoned()?
+                .timestamp();
+            if target > now {
+                return Ok(target);
+            }
+        }
+
+        let date = next_weekday(now_date.tomorrow()?, self.config.travel_day);
         Ok(date
             .to_datetime(self.config.destination_arrival_time)
             .to_london_zoned()?
