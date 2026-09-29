@@ -323,7 +323,7 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
             .departures_between(
                 self.config.stations.destination_line_interchange,
                 self.config.stations.destination,
-                // TODO: Document assumptions on `now`, maybe use something better if needed?
+                // TODO: `now` is incorrect
                 now,
             )
             .await?;
@@ -394,11 +394,9 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         now: Timestamp,
     ) -> Result<(TrainServices, TrainServices, TrainServices, TrainServices)> {
         let span = Span::current();
+        let outbound_search_start = self.outbound_search_start(now).await?;
         let outbound_first = self
-            .trains_for_leg(
-                JourneyLeg::HomeToPrimaryInterchange,
-                now.checked_add(self.config.walk.home_to_station_1)?,
-            )
+            .trains_for_leg(JourneyLeg::HomeToPrimaryInterchange, outbound_search_start)
             .await?;
         span.record("outbound_first", outbound_first.len());
         let outbound_second = self.best_second_leg_options(&outbound_first, now).await?;
@@ -414,16 +412,32 @@ impl<P: TrainProvider, N: Notifier> App<P, N> {
         Ok((outbound_first, outbound_second, return_first, return_second))
     }
 
+    /// Returns the earliest time to query the first outbound leg from, assuming still at home.
+    /// Takes the latest of the current time and the time to leave home to make the first train.
+    #[tracing::instrument(skip(self), fields(
+        now = tracing::field::display(now),
+        leave_house = tracing::field::Empty,
+        search_start = tracing::field::Empty,
+    ))]
+    async fn outbound_search_start(&self, now: Timestamp) -> Result<Timestamp> {
+        let span = Span::current();
+        let leave_house = self.monitoring_start_time(now).await?;
+        span.record("leave_house", tracing::field::display(leave_house));
+        let search_start = leave_house
+            .max(now)
+            .checked_add(self.config.walk.home_to_station_1)?;
+        span.record("search_start", tracing::field::display(search_start));
+        Ok(search_start)
+    }
+
     async fn notify_for_state(&self, state: &JourneyState, now: Timestamp) -> Result<()> {
         match state {
             JourneyState::Waiting => {
                 // TODO: We should leave the status report up instead of replacing it immediately on
                 // the next poll as we don't include return status here
+                let search_start = self.outbound_search_start(now).await?;
                 let first = self
-                    .trains_for_leg(
-                        JourneyLeg::HomeToPrimaryInterchange,
-                        now.checked_add(self.config.walk.home_to_station_1)?,
-                    )
+                    .trains_for_leg(JourneyLeg::HomeToPrimaryInterchange, search_start)
                     .await?;
                 let second = self.best_second_leg_options(&first, now).await?;
                 self.notifier.send_outbound_update(&first, &second).await
