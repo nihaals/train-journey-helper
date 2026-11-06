@@ -1,3 +1,5 @@
+import "pkl:net"
+
 stations: Stations
 walk: WalkTimes
 destination_arrival_time: Time
@@ -48,11 +50,12 @@ typealias Time = String(matches(Regex(#"\d{2}:\d{2}"#)))
 typealias Weekday =
   "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday"
 typealias SocketAddr = String(matches(Regex(#"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{1,5}"#)))
-typealias Url = String(matches(Regex(#"https?://.+"#)))
+local const function isNonEmptyString(value: String?): Boolean = value != null && value.isNotEmpty
+typealias Url = net.Url((scheme == "http" || scheme == "https") && isNonEmptyString(host))
 typealias Jwt = String(matches(Regex(#"[\da-zA-Z-_]+\.[\da-zA-Z-_]+\.[\da-zA-Z-_]+"#)))
 
 class HomeAssistantConfig {
-  base_url: Url(endsWith("/api/"))
+  base_url: Url(path.endsWith("/api/") && rawQuery == null && rawFragment == null)
   token: Jwt
   notify_service: String(matches(Regex(#"([\da-z][\da-z_]*[\da-z]|[\da-z])"#)))
 }
