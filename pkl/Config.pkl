@@ -10,9 +10,14 @@ home_assistant: HomeAssistantConfig
 rtt: RttConfig
 
 local const function durationToMinutes(value: Duration): Number = value.toUnit("min").value
+local const function assertType<T>(value: Any, expectedType: Class<T>): T =
+  if (value.getClass() != expectedType)
+    throw("Expected \(expectedType), got \(value.getClass())")
+  else
+    value
 local class ConvertDurationMinutes extends ConvertProperty {
-  render = (property: Pair<String, Duration>, _) ->
-    Pair(property.key + "_minutes", durationToMinutes(property.value))
+  render = (property: Pair<String, Any>, _) ->
+    Pair(property.key + "_minutes", durationToMinutes(assertType(property.value, Duration)))
 }
 local const function isPositiveIntMinutes(value: Duration): Boolean =
   durationToMinutes(value) > 0
