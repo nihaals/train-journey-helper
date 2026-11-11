@@ -62,5 +62,8 @@ class RttConfig {
 output {
   renderer = new JsonRenderer {
     omitNullProperties = false
+    converters {
+      [net.Url] = (url: net.Url) -> url.toString()
+    }
   }
 }
